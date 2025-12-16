@@ -1,0 +1,50 @@
+#+TITLE: Test YouTube Playlist Update
+#+DATE: 2025-12-15
+
+* Test Playlist
+
+This file tests the youtube-playlist module with the API key from authinfo.
+
+To test:
+1. Load the module: M-x eval-buffer on youtube-playlist.el
+2. Open this file in Emacs
+3. Run: M-x youtube-playlist-update-all
+
+The table should be generated below this line:
+
+#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
+| 0  |  |  |   N/A | 2025-12-12 | [[https://www.youtube.com/watch?v=1zy2JxAh1mQ][1zy2JxAh1mQ]] | Private video |
+| 1  |  |  |   N/A | 2025-12-05 | [[https://www.youtube.com/watch?v=75QLDPGnvVA][75QLDPGnvVA]] | Private video |
+| 2  |  |  |   N/A | 2025-10-08 | [[https://www.youtube.com/watch?v=aonokGYvtYM][aonokGYvtYM]] | Private video |
+| 3  | WATCHED | IMPORTANT |  7:13 | 2021-04-26 | [[https://www.youtube.com/watch?v=TOg98tz6ZZM][TOg98tz6ZZM]] | Temples VS Shrines お寺と神社 - Intermediate Japanese 日本語中級 |
+| 4  |  |  |  7:48 | 2021-04-29 | [[https://www.youtube.com/watch?v=dAzIvhrht8c][dAzIvhrht8c]] | The People on Japanese Bills 日本の紙幣に描かれている人物 - Intermediate Japanese 中級日本語 |
+| 5  |  |  |  4:39 | 2021-05-06 | [[https://www.youtube.com/watch?v=Km8avn7oM1g][Km8avn7oM1g]] | Terrible Twos!? 魔の二歳児！？ - Intermediate Japanese 中級日本語 |
+| 6  |  |  |  7:29 | 2021-05-14 | [[https://www.youtube.com/watch?v=TJld5iy4DwE][TJld5iy4DwE]] | What Is Comprehensible Input? "理解可能なインプット"とは？ - Intermediate Japanese 日本語中級 |
+| 7  |  |  |  7:26 | 2021-09-03 | [[https://www.youtube.com/watch?v=SU9wSOaSazM][SU9wSOaSazM]] | Autumn in Japan 日本の秋 - Intermediate Japanese 日本語中級 |
+| 8  |  |  | 11:12 | 2021-09-17 | [[https://www.youtube.com/watch?v=yNd1j4bTx2g][yNd1j4bTx2g]] | Extensive Reading 多読 - Intermediate Japanese 日本語中級 |
+| 9  |  |  | 17:32 | 2022-05-30 | [[https://www.youtube.com/watch?v=CLrcP68Ou7c][CLrcP68Ou7c]] | Conversation with Noriko sensei のりこ先生と会話 - Intermediate Japanese 日本語中級 |
+| 10 |  |  | 12:58 | 2022-11-16 | [[https://www.youtube.com/watch?v=M9MLcVGh6ms][M9MLcVGh6ms]] | 50 Questions with Noriko のりこさんに50の質問@LearnJapanesewithNoriko 日本語中級 Intermediate Japanese |
+| 11 |  |  | 12:14 | 2023-11-13 | [[https://www.youtube.com/watch?v=qEWQxAetY9g][qEWQxAetY9g]] | 日本語中級 Intermediate Japanese🇯🇵冬の寒さ対策 How to Keep Warm in Winter🥶 Comprehensible Input |
+| 12 |  |  | 18:06 | 2023-12-20 | [[https://www.youtube.com/watch?v=fYh5lNxJSjs][fYh5lNxJSjs]] | Japanese Conversation (Intermediate) 日本語会話（中級）with Ken-san @kensanokaeri |
+| 13 |  |  | 17:25 | 2023-12-20 | [[https://www.youtube.com/watch?v=5SFO4TJxFTA][5SFO4TJxFTA]] | Intermediate Japanese Conversation 中級日本語会話 with @kensanokaeri |
+| 14 |  |  |  7:09 | 2024-02-22 | [[https://www.youtube.com/watch?v=aEnO1a06kxU][aEnO1a06kxU]] | 👩🏻‍🏫🇯🇵日本語中級 Intermediate Japanese | Comprehensible Input | 「やさしい日本語」とは？What Is "Easy Japanese"?? |
+| 15 |  |  | 14:33 | 2024-05-30 | [[https://www.youtube.com/watch?v=h9XdkGyYeaA][h9XdkGyYeaA]] | Learn Japanese with a web comic "Pepper & Carrot" EP01 - Comprehensible Input for Intermediate |
+| 16 |  |  | 11:50 | 2024-06-18 | [[https://www.youtube.com/watch?v=BjseHC7LO8s][BjseHC7LO8s]] | Intermediate Japanese Comprehensible Input（中級日本語）- Let's read Pepper & Carrot with me🇯🇵👩🏻‍🏫 |
+| 17 |  |  | 15:56 | 2024-07-30 | [[https://www.youtube.com/watch?v=Iz-zQNX1Dcg][Iz-zQNX1Dcg]] | 🇯🇵🗣️Intermediate Japanese Conversation about Summer🌻🍧 with @kensanokaeri  - Comprehensible Input |
+| 18 |  |  | 19:58 | 2024-10-04 | [[https://www.youtube.com/watch?v=zgfNtzYzAZQ][zgfNtzYzAZQ]] | 🇯🇵👩🏻‍🏫Intermediate Japanese - Printed Books vs E-Books📚Comprehensible Input |
+| 19 |  |  | 42:22 | 2025-02-12 | [[https://www.youtube.com/watch?v=SMrj8P_KCtw][SMrj8P_KCtw]] | 🇯🇵🎮Learn Japanese with KUUKIYOMI: Consider It (Intermediate Japanese) ゲームで日本語（中級） |
+| 20 |  |  | 31:58 | 2025-03-14 | [[https://www.youtube.com/watch?v=WBesKJmHAE0][WBesKJmHAE0]] | 🇯🇵🎮Learn Japanese with Keep Talking and Nobody Explodes💣 Intermediate Japanese @kensanokaeri |
+| 21 |  |  | 37:16 | 2025-03-19 | [[https://www.youtube.com/watch?v=QZjNs0cyA9E][QZjNs0cyA9E]] | Intermediate Japanese🇯🇵Keep Talking and Nobody Explodes EP02💣🎮 @kensanokaeri |
+| 22 |  |  | 20:08 | 2025-04-10 | [[https://www.youtube.com/watch?v=DvqcQ-zy-aw][DvqcQ-zy-aw]] | 🙅🏻‍♀️🈲No Katakana Game with Ken @kensanokaeri (2) 🇯🇵👩🏻‍🏫Intermediate Japanese Comprehensible Input |
+| 23 |  |  | 46:32 | 2025-04-21 | [[https://www.youtube.com/watch?v=hC2ZkWawa1E][hC2ZkWawa1E]] | ゲームで日本語🎮🇯🇵 Learn Japanese with a Game Consider It 2 - Intermediate Japanese Comprehensible Input |
+| 24 |  |  | 19:23 | 2025-04-18 | [[https://www.youtube.com/watch?v=7ZfbyGLakSg][7ZfbyGLakSg]] | Learn Japanese with a Web Comic Pepper & Carrot EP03🧙‍♀️🐈 Intermediate Japanese Comprehensible Input |
+| 25 |  |  | 17:47 | 2025-04-28 | [[https://www.youtube.com/watch?v=gqCPzkfIaXo][gqCPzkfIaXo]] | 🇯🇵🗣️Intermediate Japanese Conversation with @kensanokaeri - Lunch at a Taiwanese Cafe🇹🇼 |
+| 26 |  |  | 13:22 | 2025-04-18 | [[https://www.youtube.com/watch?v=LpjN03h94Mg][LpjN03h94Mg]] | Learn Japanese with a Web Comic Pepper & Carrot EP04🧙‍♀️🐈 Intermediate Japanese Comprehensible Input |
+| 27 |  |  | 23:00 | 2025-04-18 | [[https://www.youtube.com/watch?v=R-bfI212O-8][R-bfI212O-8]] | Learn Japanese with a Web Comic Pepper & Carrot EP06🧙‍♀️🐈 Intermediate Japanese Comprehensible Input |
+| 28 |  |  | 58:28 | 2025-05-28 | [[https://www.youtube.com/watch?v=aXxZTxDbDHw][aXxZTxDbDHw]] | Learn Japanese with Video Games🎮🇯🇵Hello Kitty Island AdventureEP01 - Intermediate Japanese |
+| 29 |  |  | 1:05:45 | 2025-06-05 | [[https://www.youtube.com/watch?v=eJykgiLaE2M][eJykgiLaE2M]] | Learn Japanese with Video Games🎮🇯🇵Hello Kitty Island Adventure EP02 - Intermediate Japanese |
+| 30 |  |  | 15:36 | 2025-07-31 | [[https://www.youtube.com/watch?v=xKEY7DnqOIk][xKEY7DnqOIk]] | 🇯🇵👩🏻‍🏫Intermediate Japanese Comprehensible Input | What’s in My Mini Emergency Pouch? |
+| 31 |  |  | 22:25 | 2025-08-28 | [[https://www.youtube.com/watch?v=19QBtOgwmxk][19QBtOgwmxk]] | Learn Japanese with Video Games - Shinkansen 0🚄  (Intermediate Japanese Comprehensible Input) |
+| 32 |  |  | 17:41 | 2025-09-11 | [[https://www.youtube.com/watch?v=mrVp-zAs1XY][mrVp-zAs1XY]] | 🇯🇵Japanese Cosmetics💄Intermediate Japanese Comprehensible Input |
+| 33 |  |  | 40:28 | 2025-10-28 | [[https://www.youtube.com/watch?v=-mWoYWktTDE][-mWoYWktTDE]] | 🇯🇵🎧 Intermediate Japanese Comprehensible Input - Japanese Restaurant Chain Tier List |
+| 34 |  |  | 40:01 | 2025-10-29 | [[https://www.youtube.com/watch?v=ea6rpLN_KAk][ea6rpLN_KAk]] | [Reupload w/English Subtitles] Interview with Our Student🇯🇵🎤 Intermediate Japanese Conversation |

@@ -1,0 +1,37 @@
+#+TITLE: YouTube Playlist Example
+#+AUTHOR: Your Name
+#+DATE: 2025-12-15
+
+* Japanese Learning Videos
+
+This is an example of using youtube-playlist.el to manage YouTube playlist information.
+
+After setting up your API key, run =M-x youtube-playlist-update-all= to generate/update the table below.
+
+#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
+
+* Notes
+
+- The first column shows the video index (0-based)
+- Columns 2 and 3 are for your manual notes (e.g., "watched", "important", etc.)
+- These manual notes will be preserved when you update the table
+- Videos removed from the playlist will have their index changed to "NA" but won't be deleted
+
+* Multiple Playlists
+
+You can have multiple playlists in the same file:
+
+** Playlist 1
+
+#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID_1
+
+** Playlist 2
+
+#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID_2
+
+* Tips
+
+1. Run =M-x youtube-playlist-update-all= to update all playlists in the buffer
+2. Add your notes in columns 2 and 3 - they'll be preserved across updates
+3. The table shows videos from oldest to newest
+4. Video metadata (title, duration, date) is automatically refreshed on each update
