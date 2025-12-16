@@ -34,6 +34,7 @@
 (require 'json)
 (require 'iso8601)
 (require 'auth-source)
+(require 'cl-lib)
 
 ;;; Customization
 
@@ -231,23 +232,35 @@ Returns list of video alists, ordered oldest to newest."
         (setq videos (append videos items))
         (setq next-page-token (cdr (assoc 'nextPageToken response)))))
 
-    ;; Fetch durations in batches
-    (let* ((video-ids (mapcar (lambda (item)
-                                (cdr (assoc 'videoId
-                                           (cdr (assoc 'contentDetails item)))))
-                              videos))
-           (duration-response (youtube-playlist--fetch-video-details video-ids))
-           (duration-items (cdr (assoc 'items duration-response)))
-           (duration-alist (mapcar (lambda (item)
-                                     (let* ((id (cdr (assoc 'id item)))
-                                            (content (cdr (assoc 'contentDetails item)))
-                                            (duration (cdr (assoc 'duration content))))
-                                       (cons (intern id) duration)))
-                                   duration-items)))
-      ;; Parse videos and reverse to get oldest-first order
-      (reverse (mapcar (lambda (item)
-                         (youtube-playlist--parse-video-from-item item duration-alist))
-                       videos)))))
+    ;; Deduplicate videos by video-id, keeping first occurrence
+    (let* ((seen-ids (make-hash-table :test 'equal))
+           (unique-videos
+            (cl-remove-if (lambda (item)
+                            (let ((video-id (cdr (assoc 'videoId
+                                                       (cdr (assoc 'contentDetails item))))))
+                              (if (gethash video-id seen-ids)
+                                  t  ; Remove this item (duplicate)
+                                (puthash video-id t seen-ids)
+                                nil)))  ; Keep this item (first occurrence)
+                          videos)))
+
+      ;; Fetch durations in batches
+      (let* ((video-ids (mapcar (lambda (item)
+                                  (cdr (assoc 'videoId
+                                             (cdr (assoc 'contentDetails item)))))
+                                unique-videos))
+             (duration-response (youtube-playlist--fetch-video-details video-ids))
+             (duration-items (cdr (assoc 'items duration-response)))
+             (duration-alist (mapcar (lambda (item)
+                                       (let* ((id (cdr (assoc 'id item)))
+                                              (content (cdr (assoc 'contentDetails item)))
+                                              (duration (cdr (assoc 'duration content))))
+                                         (cons (intern id) duration)))
+                                     duration-items)))
+        ;; Parse videos and reverse to get oldest-first order
+        (reverse (mapcar (lambda (item)
+                           (youtube-playlist--parse-video-from-item item duration-alist))
+                         unique-videos))))))
 
 ;;; Table Parsing Functions
 

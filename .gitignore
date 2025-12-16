@@ -1,0 +1,20 @@
+# Emacs temporary files
+*~
+\#*\#
+.\#*
+*.elc
+
+# Auth files (NEVER commit these!)
+.authinfo
+.authinfo.gpg
+.authinfo.pgp
+authinfo
+authinfo.gpg
+
+# Test files with potentially sensitive data
+test-output.org
+my-playlists.org
+
+# Backup files
+*.bak
+*.orig
