@@ -9,6 +9,8 @@ An Emacs package for managing YouTube playlist information in org-mode files.
 - Preserves manual notes when updating tables
 - Marks removed videos as "NA" instead of deleting them
 - Lists videos from oldest to newest
+- **Offset parameter** to skip the first N videos from a playlist
+- Automatic deduplication of videos (keeps first occurrence)
 - Full UTF-8 support for international characters (Japanese, emojis, etc.)
 - Professional, functional, maintainable codebase
 
@@ -67,6 +69,18 @@ In your org-mode file, add a `#+YOUTUBE_UPDATE:` directive with a playlist URL:
 #+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
 ```
 
+**Optional: Use offset parameter to skip videos**
+
+You can skip the first N videos from a playlist using the `:offset=N` parameter:
+
+```org
+* Show only recent videos (skip first 100)
+
+#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt:offset=100
+```
+
+This will skip the first 100 videos and display only videos 100 onwards. The index column will start from the offset value (100 in this example).
+
 ### 2. Generate/Update Tables
 
 Run the update command:
@@ -80,6 +94,11 @@ This will generate a table below the directive:
 #+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
 | 0  |  |  |  7:13 | 2024-01-15 | [[https://www.youtube.com/watch?v=TOg98tz6ZZM][TOg98tz6ZZM]] | Video Title Here |
 | 1  |  |  | 12:45 | 2024-01-20 | [[https://www.youtube.com/watch?v=abc123][abc123]]          | Another Video    |
+
+With offset:
+#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt:offset=30
+| 30 |  |  | 15:36 | 2025-07-31 | [[https://www.youtube.com/watch?v=xKEY7DnqOIk][xKEY7DnqOIk]] | 🇯🇵👩🏻‍🏫Intermediate Japanese Comprehensible Input | What's in My Mini Emergency Pouch? |
+| 31 |  |  | 10:22 | 2025-08-02 | [[https://www.youtube.com/watch?v=def456][def456]]          | Another Video    |
 ```
 
 ### 3. Add Manual Notes

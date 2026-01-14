@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2025
 
-;; Author:
+;; Author: Daniel M German with the help of Claude
 ;; Version: 1.0.0
 ;; Package-Requires: ((emacs "27.1") (request "0.3.0"))
 ;; Keywords: multimedia, org-mode, youtube
@@ -391,14 +391,26 @@ Returns t if successful, nil otherwise."
   (save-excursion
     (beginning-of-line)
     (when (looking-at "^[[:space:]]*#\\+YOUTUBE_UPDATE:[[:space:]]+\\(.+\\)$")
-      (let* ((url (string-trim (match-string 1)))
+      (let* ((line (string-trim (match-string 1)))
+             ;; Parse offset parameter (e.g., ":offset=319")
+             (offset (if (string-match ":offset=\\([0-9]+\\)" line)
+                         (string-to-number (match-string 1 line))
+                       0))
+             ;; Remove offset parameter from URL for parsing
+             (url (replace-regexp-in-string ":offset=[0-9]+" "" line))
              (playlist-id (youtube-playlist--extract-playlist-id url)))
         (unless playlist-id
           (error "Could not extract playlist ID from: %s" url))
 
-        (message "Fetching playlist %s..." playlist-id)
-        (let* ((videos (youtube-playlist--fetch-all-videos playlist-id))
-               (new-rows (let ((index 0))
+        (if (> offset 0)
+            (message "Fetching playlist %s (skipping first %d videos)..." playlist-id offset)
+          (message "Fetching playlist %s..." playlist-id))
+        (let* ((all-videos (youtube-playlist--fetch-all-videos playlist-id))
+               ;; Apply offset: skip the first N videos
+               (videos (if (> offset 0)
+                           (nthcdr offset all-videos)
+                         all-videos))
+               (new-rows (let ((index offset))
                            (mapcar (lambda (video)
                                      (prog1
                                          (youtube-playlist--video-to-row index video)
