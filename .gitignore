@@ -4,6 +4,9 @@
 .\#*
 *.elc
 
+# Project-local ELPA populated by the Makefile
+.elpa/
+
 # Auth files (NEVER commit these!)
 .authinfo
 .authinfo.gpg

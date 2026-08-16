@@ -1,0 +1,403 @@
+This is youtube-gt.info, produced by makeinfo version 7.3 from
+youtube-gt.texi.
+
+INFO-DIR-SECTION Emacs
+START-INFO-DIR-ENTRY
+* youtube-gt: (youtube-gt). Manage YouTube playlist tables in org-mode files.
+END-INFO-DIR-ENTRY
+
+
+File: youtube-gt.info,  Node: Top,  Next: Features,  Up: (dir)
+
+youtube-gt
+**********
+
+An Emacs package for managing YouTube playlist information in org-mode
+files.
+
+* Menu:
+
+* Features::
+* Installation::
+* Usage::
+* Table Format::
+* Configuration::
+* Requirements::
+* API Quota::
+* Troubleshooting::
+* Info manual::
+* License::
+
+-- The Detailed Node Listing --
+
+Installation
+
+* 1. Get a YouTube API Key: 1 Get a YouTube API Key.
+* 2. Install the Package: 2 Install the Package.
+* 3. Configure API Key: 3 Configure API Key.
+
+Usage
+
+* 1. Add Playlist References: 1 Add Playlist References.
+* 2. Generate/Update Tables: 2 Generate/Update Tables.
+* 3. Add Manual Notes: 3 Add Manual Notes.
+* 4. Update Behavior: 4 Update Behavior.
+
+Configuration
+
+* API Key::
+* Max Results Per Request::
+
+Troubleshooting
+
+* ``YouTube API key not set''::
+* ``YouTube API error ...''::
+* Table not updating::
+
+
+File: youtube-gt.info,  Node: Features,  Next: Installation,  Prev: Top,  Up: Top
+
+Features
+********
+
+   • Fetches playlist data from YouTube Data API v3
+   • *Channel support* — use channel URLs like ‘@username’ to get all
+     uploads
+   • Generates formatted org-mode tables with video information
+   • Preserves manual notes when updating tables
+   • Marks removed videos as "NA" instead of deleting them
+   • Lists videos from oldest to newest
+   • *Offset parameter* to skip the first N videos from a playlist
+   • Automatic deduplication of videos (keeps first occurrence)
+   • Full UTF-8 support for international characters (Japanese, emojis,
+     etc.)
+
+
+File: youtube-gt.info,  Node: Installation,  Next: Usage,  Prev: Features,  Up: Top
+
+Installation
+************
+
+* Menu:
+
+* 1. Get a YouTube API Key: 1 Get a YouTube API Key.
+* 2. Install the Package: 2 Install the Package.
+* 3. Configure API Key: 3 Configure API Key.
+
+
+File: youtube-gt.info,  Node: 1 Get a YouTube API Key,  Next: 2 Install the Package,  Up: Installation
+
+1. Get a YouTube API Key
+========================
+
+  1. Go to Google Cloud Console (https://console.developers.google.com/)
+  2. Create a new project or select an existing one
+  3. Enable the *YouTube Data API v3*
+  4. Create credentials (API key)
+  5. Copy your API key
+
+
+File: youtube-gt.info,  Node: 2 Install the Package,  Next: 3 Configure API Key,  Prev: 1 Get a YouTube API Key,  Up: Installation
+
+2. Install the Package
+======================
+
+Place ‘youtube-gt.el’ in your Emacs load path, then add to your init
+file:
+
+     (require 'youtube-gt)
+
+
+File: youtube-gt.info,  Node: 3 Configure API Key,  Prev: 2 Install the Package,  Up: Installation
+
+3. Configure API Key
+====================
+
+Two options for providing the API key:
+
+   *Option A: Using authinfo (recommended for security)*
+
+   Add to your ‘~/.authinfo.gpg’ file:
+
+     machine youtube.com login dmg password YOUR-API-KEY-HERE
+
+   The module reads the key from authinfo when needed.
+
+   *Option B: Using Emacs customization*
+
+   Set the key in your init file:
+
+     (setq youtube-gt-api-key "YOUR-API-KEY-HERE")
+
+   Or set it interactively:
+
+     M-x customize-variable RET youtube-gt-api-key RET
+
+
+File: youtube-gt.info,  Node: Usage,  Next: Table Format,  Prev: Installation,  Up: Top
+
+Usage
+*****
+
+* Menu:
+
+* 1. Add Playlist References: 1 Add Playlist References.
+* 2. Generate/Update Tables: 2 Generate/Update Tables.
+* 3. Add Manual Notes: 3 Add Manual Notes.
+* 4. Update Behavior: 4 Update Behavior.
+
+
+File: youtube-gt.info,  Node: 1 Add Playlist References,  Next: 2 Generate/Update Tables,  Up: Usage
+
+1. Add Playlist References
+==========================
+
+In an org-mode file, add a ‘#+YOUTUBE-GT_UPDATE:’ directive with a
+playlist URL or channel URL:
+
+   *Playlist URL:*
+
+     * My Playlist
+
+     #+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
+
+   *Channel URL (all uploads):*
+
+     * Channel Videos
+
+     #+YOUTUBE-GT_UPDATE: https://www.youtube.com/@mynameisandong/videos
+
+   This fetches all uploaded videos from the channel's uploads playlist.
+
+   *Optional: use offset parameter to skip videos*
+
+   Skip the first N videos from a playlist using the ‘:offset=N’
+parameter:
+
+     * Show only recent videos (skip first 100)
+
+     #+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt:offset=100
+
+   This skips the first 100 videos and displays only videos 100 onwards.
+The index column starts from the offset value (100 in this example).
+
+
+File: youtube-gt.info,  Node: 2 Generate/Update Tables,  Next: 3 Add Manual Notes,  Prev: 1 Add Playlist References,  Up: Usage
+
+2. Generate/Update Tables
+=========================
+
+Run the update command:
+
+     M-x youtube-gt-update-all
+
+   This generates a table below the directive:
+
+     #+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
+     | 0  |  |  |  7:13 | 2024-01-15 | [[https://www.youtube.com/watch?v=TOg98tz6ZZM][TOg98tz6ZZM]] | Video Title Here |
+     | 1  |  |  | 12:45 | 2024-01-20 | [[https://www.youtube.com/watch?v=abc123][abc123]]          | Another Video    |
+
+
+File: youtube-gt.info,  Node: 3 Add Manual Notes,  Next: 4 Update Behavior,  Prev: 2 Generate/Update Tables,  Up: Usage
+
+3. Add Manual Notes
+===================
+
+The second and third columns are reserved for manual notes:
+
+     | 0  | watched | important |  7:13 | 2024-01-15 | [[...][...]] | Video Title |
+     | 1  |         | to-review | 12:45 | 2024-01-20 | [[...][...]] | Another Video |
+
+   These notes are *preserved* on the next ‘youtube-gt-update-all’ run.
+
+
+File: youtube-gt.info,  Node: 4 Update Behavior,  Prev: 3 Add Manual Notes,  Up: Usage
+
+4. Update Behavior
+==================
+
+   • New videos are added with sequential indices
+   • Existing videos retain their manual notes
+   • Videos removed from the playlist are marked with index "NA" but
+     kept in the table
+   • Video metadata (title, date, duration) is refreshed
+
+
+File: youtube-gt.info,  Node: Table Format,  Next: Configuration,  Prev: Usage,  Up: Top
+
+Table Format
+************
+
+Column   Description                                        Example
+----------------------------------------------------------------------------------------
+1        Video index (0-based) or "NA" for removed videos   ‘0’, ‘1’, ‘NA’
+2        Manual note column 1                               ‘watched’
+3        Manual note column 2                               ‘important’
+4        Video duration                                     ‘7:13’, ‘1:23:45’
+5        Publication date (ISO format)                      ‘2024-01-15’
+6        Video URL (org link with video ID as label)        ‘[[https://...][abc123]]’
+7        Video title                                        ‘Video Title Here’
+
+
+File: youtube-gt.info,  Node: Configuration,  Next: Requirements,  Prev: Table Format,  Up: Top
+
+Configuration
+*************
+
+* Menu:
+
+* API Key::
+* Max Results Per Request::
+
+
+File: youtube-gt.info,  Node: API Key,  Next: Max Results Per Request,  Up: Configuration
+
+API Key
+=======
+
+     (setq youtube-gt-api-key "YOUR-API-KEY")
+
+
+File: youtube-gt.info,  Node: Max Results Per Request,  Prev: API Key,  Up: Configuration
+
+Max Results Per Request
+=======================
+
+     (setq youtube-gt-max-results 50)  ; Default: 50
+
+
+File: youtube-gt.info,  Node: Requirements,  Next: API Quota,  Prev: Configuration,  Up: Top
+
+Requirements
+************
+
+   • Emacs 27.1+
+   • Internet connection for API access
+   • YouTube Data API v3 key
+
+
+File: youtube-gt.info,  Node: API Quota,  Next: Troubleshooting,  Prev: Requirements,  Up: Top
+
+API Quota
+*********
+
+The YouTube Data API has a daily quota limit.  Each update operation
+uses:
+
+   • 1 quota unit per 50 videos (playlistItems call)
+   • 1 quota unit per video details batch (videos call)
+
+   The default daily quota is 10,000 units, which is sufficient for most
+use cases.
+
+
+File: youtube-gt.info,  Node: Troubleshooting,  Next: Info manual,  Prev: API Quota,  Up: Top
+
+Troubleshooting
+***************
+
+* Menu:
+
+* ``YouTube API key not set''::
+* ``YouTube API error ...''::
+* Table not updating::
+
+
+File: youtube-gt.info,  Node: ``YouTube API key not set'',  Next: ``YouTube API error ...'',  Up: Troubleshooting
+
+"YouTube API key not set"
+=========================
+
+Set your API key using ‘M-x customize-variable youtube-gt-api-key’.
+
+
+File: youtube-gt.info,  Node: ``YouTube API error ...'',  Next: Table not updating,  Prev: ``YouTube API key not set'',  Up: Troubleshooting
+
+"YouTube API error: ..."
+========================
+
+Check that:
+
+  1. Your API key is valid
+  2. YouTube Data API v3 is enabled in your Google Cloud project
+  3. You haven't exceeded your API quota
+  4. The playlist URL is correct and the playlist is public
+
+
+File: youtube-gt.info,  Node: Table not updating,  Prev: ``YouTube API error ...'',  Up: Troubleshooting
+
+Table not updating
+==================
+
+Ensure:
+
+  1. You're running the command in an org-mode buffer
+  2. The ‘#+YOUTUBE-GT_UPDATE:’ line has a valid playlist URL
+  3. Your internet connection is working
+
+
+File: youtube-gt.info,  Node: Info manual,  Next: License,  Prev: Troubleshooting,  Up: Top
+
+Info manual
+***********
+
+The Info version of this README (‘youtube-gt.info’) and its ‘dir’ entry
+live at the package root, following the multi-file ELPA convention.
+‘package.el’ adds the package's directory to ‘Info-directory-list’
+automatically on activation.
+
+   For installs that bypass ‘package.el’ (raw ‘:load-path’, git
+submodule, straight.el without info handling), point Info at the package
+directory once:
+
+     (with-eval-after-load 'info
+       (info-initialize)
+       (add-to-list 'Info-directory-list
+                    (file-name-directory (locate-library "youtube-gt"))))
+
+
+File: youtube-gt.info,  Node: License,  Prev: Info manual,  Up: Top
+
+License
+*******
+
+Copyright (C) 2025, 2026 Daniel M.  German.
+
+   This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by the
+Free Software Foundation, either version 3 of the License, or (at your
+option) any later version.  See ‘LICENSE’ for details.
+
+
+Tag Table:
+Node: Top223
+Node: Features1113
+Node: Installation1803
+Node: 1 Get a YouTube API Key2074
+Node: 2 Install the Package2452
+Node: 3 Configure API Key2741
+Node: Usage3361
+Node: 1 Add Playlist References3671
+Node: 2 Generate/Update Tables4711
+Node: 3 Add Manual Notes5341
+Node: 4 Update Behavior5814
+Node: Table Format6198
+Node: Configuration7048
+Node: API Key7226
+Node: Max Results Per Request7383
+Node: Requirements7579
+Node: API Quota7795
+Node: Troubleshooting8189
+Node: ``YouTube API key not set''8414
+Node: ``YouTube API error ...''8657
+Node: Table not updating9059
+Node: Info manual9377
+Node: License10086
+
+End Tag Table
+
+
+Local Variables:
+coding: utf-8
+Info-documentlanguage: en
+End:

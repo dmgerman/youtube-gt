@@ -1,0 +1,4 @@
+(youtube-gt
+ :fetcher github
+ :repo "dmgerman/youtube-gt"
+ :files ("youtube-gt.el" "youtube-gt.info" "dir"))

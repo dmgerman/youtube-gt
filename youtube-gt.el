@@ -1,23 +1,40 @@
-;;; youtube-playlist.el --- Update YouTube playlist tables in org-mode -*- lexical-binding: t; -*-
+;;; youtube-gt.el --- Update YouTube playlist tables in org-mode -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2025
+;; Copyright (C) 2025, 2026 Daniel M. German <dmg@turingmachine.org>
 
-;; Author: Daniel M German with the help of Claude
+;; Author: Daniel M. German <dmg@turingmachine.org>
+;; Maintainer: Daniel M. German <dmg@turingmachine.org>
+;; Assisted-by: Claude:claude-opus-4-7
+;; Keywords: multimedia, hypermedia, tools
+;; URL: https://github.com/dmgerman/youtube-gt
 ;; Version: 1.0.0
-;; Package-Requires: ((emacs "27.1") (request "0.3.0"))
-;; Keywords: multimedia, org-mode, youtube
-;; URL:
+;; Package-Requires: ((emacs "27.1"))
+
+;; SPDX-License-Identifier: GPL-3.0-or-later
+;;
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+;;
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+;;
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
 ;; This package provides functionality to scan org-mode files for
-;; #+YOUTUBE_UPDATE: directives and generate/update tables with
+;; #+YOUTUBE-GT_UPDATE: directives and generate/update tables with
 ;; playlist video information using the YouTube Data API v3.
 ;;
 ;; Usage:
-;;   1. Set your YouTube API key: M-x customize-variable youtube-playlist-api-key
-;;   2. Add #+YOUTUBE_UPDATE: <playlist-url> to your org file
-;;   3. Run M-x youtube-playlist-update-all
+;;   1. Set your YouTube API key: M-x customize-variable youtube-gt-api-key
+;;   2. Add #+YOUTUBE-GT_UPDATE: <playlist-url> to your org file
+;;   3. Run M-x youtube-gt-update-all
 ;;
 ;; The generated table includes:
 ;;   - Video index (0-based)
@@ -38,38 +55,58 @@
 
 ;;; Customization
 
-(defgroup youtube-playlist nil
-  "YouTube playlist integration for org-mode."
+(defgroup youtube-gt nil
+  "YouTube playlist integration for `org-mode'."
   :group 'multimedia
-  :prefix "youtube-playlist-")
+  :prefix "youtube-gt-")
 
-(defcustom youtube-playlist-api-key nil
+(defcustom youtube-gt-api-key nil
   "YouTube Data API v3 key.
+
+Ignored if authinfo has a valid key.  Only define it if you do not
+use authinfo; see `youtube-gt--get-api-key'.
+
 Get one from https://console.developers.google.com/"
   :type '(choice (const :tag "Not set" nil)
                  (string :tag "API Key"))
-  :group 'youtube-playlist)
+  :group 'youtube-gt)
 
-(defcustom youtube-playlist-max-results 50
+(defcustom youtube-gt-max-results 50
   "Maximum number of results to fetch per API request."
   :type 'integer
-  :group 'youtube-playlist)
+  :group 'youtube-gt)
+
+(defcustom youtube-gt-host-key "youtube.com"
+  "Host name used to find the API key in the authinfo file."
+  :type 'string
+  :group 'youtube-gt)
+
+(defcustom youtube-gt-user-name "dmg"
+  "User name used to find the YouTube API key in the authinfo file."
+  :type 'string
+  :group 'youtube-gt)
+
+(defcustom youtube-gt-directive "#+YOUTUBE-GT_UPDATE"
+  "Org-mode directive used to mark playlist/channel URLs for updating.
+The directive should be followed by a colon and URL in org files."
+  :type 'string
+  :group 'youtube-gt)
 
 ;;; Authentication
 
-(defun youtube-playlist--get-api-key ()
+(defun youtube-gt--get-api-key ()
   "Get YouTube API key from authinfo or custom variable.
-Checks auth-source first (machine: youtube.com, login: dmg),
-then falls back to `youtube-playlist-api-key'."
-  (or (when-let* ((auth (car (auth-source-search :host "youtube.com"
-                                                   :user "dmg"
+Checks auth-source first (machine: youtube.com, login: <username>),
+then falls back to `youtube-gt-api-key'."
+  (or (when-let* ((auth (car (auth-source-search :host youtube-gt-host-key
+                                                 :user youtube-gt-user-name
                                                    :require '(:secret)
                                                    :max 1)))
                   (secret (plist-get auth :secret)))
         (if (functionp secret)
             (funcall secret)
           secret))
-      youtube-playlist-api-key))
+      youtube-gt-api-key))
 
 ;;; Data Structures
 
@@ -92,19 +129,25 @@ then falls back to `youtube-playlist-api-key'."
 
 ;;; Utility Functions
 
-(defun youtube-playlist--extract-playlist-id (url)
+(defun youtube-gt--extract-playlist-id (url)
   "Extract playlist ID from YouTube URL."
   (when (string-match "list=\\([^&]+\\)" url)
     (match-string 1 url)))
 
-(defun youtube-playlist--extract-video-id (url)
+(defun youtube-gt--extract-channel-handle (url)
+  "Extract channel handle from YouTube URL like @username.
+Returns the handle with @ prefix, or nil if not a channel URL."
+  (when (string-match "youtube\\.com/@\\([^/]+\\)" url)
+    (concat "@" (substring-no-properties (match-string 1 url)))))
+
+(defun youtube-gt--extract-video-id (url)
   "Extract video ID from YouTube URL."
   (when (string-match "watch?v=\\([^&]+\\)" url)
     (match-string 1 url)))
 
-(defun youtube-playlist--format-duration (iso8601-duration)
-  "Convert ISO 8601 duration (e.g., PT1H2M3S) to HH:MM:SS format.
-Returns \"N/A\" if duration is nil or invalid."
+(defun youtube-gt--format-duration (iso8601-duration)
+  "Convert ISO8601-DURATION (e.g., PT1H2M3S) to HH:MM:SS format.
+Return \"N/A\" if ISO8601-DURATION is nil or invalid."
   (if (not iso8601-duration)
       "N/A"
     (let ((duration iso8601-duration)
@@ -127,21 +170,21 @@ Returns \"N/A\" if duration is nil or invalid."
           (format "%d:%02d:%02d" hours minutes seconds)
         (format "%d:%02d" minutes seconds)))))
 
-(defun youtube-playlist--format-date (iso8601-date)
-  "Extract and format date from ISO 8601 timestamp to YYYY-MM-DD.
-Returns \"N/A\" if date is nil or invalid."
+(defun youtube-gt--format-date (iso8601-date)
+  "Extract and format the date from ISO8601-DATE to YYYY-MM-DD.
+Return \"N/A\" if ISO8601-DATE is nil or invalid."
   (if (and iso8601-date
            (string-match "^\\([0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)" iso8601-date))
       (match-string 1 iso8601-date)
     "N/A"))
 
-(defun youtube-playlist--make-video-url (video-id)
+(defun youtube-gt--make-video-url (video-id)
   "Construct YouTube video URL from VIDEO-ID."
   (format "https://www.youtube.com/watch?v=%s" video-id))
 
 ;;; YouTube API Functions
 
-(defun youtube-playlist--api-url (endpoint params)
+(defun youtube-gt--api-url (endpoint params)
   "Construct YouTube API URL for ENDPOINT with PARAMS."
   (let ((base-url (format "https://www.googleapis.com/youtube/v3/%s" endpoint))
         (param-string (mapconcat
@@ -153,7 +196,7 @@ Returns \"N/A\" if date is nil or invalid."
                        "&")))
     (concat base-url "?" param-string)))
 
-(defun youtube-playlist--fetch-json (url)
+(defun youtube-gt--fetch-json (url)
   "Fetch and parse JSON from URL synchronously.
 Returns parsed JSON or signals error."
   (let ((url-request-method "GET")
@@ -176,56 +219,88 @@ Returns parsed JSON or signals error."
             (error "YouTube API error: %s" message)))
         response))))
 
-(defun youtube-playlist--fetch-playlist-items (playlist-id &optional page-token)
+(defun youtube-gt--fetch-playlist-items (playlist-id &optional page-token)
   "Fetch playlist items for PLAYLIST-ID.
 Optional PAGE-TOKEN for pagination."
-  (let ((api-key (youtube-playlist--get-api-key)))
+  (let ((api-key (youtube-gt--get-api-key)))
     (unless api-key
-      (error "YouTube API key not set. Use M-x customize-variable youtube-playlist-api-key or add to authinfo"))
+      (error "YouTube API key not set.  Use M-x customize-variable youtube-gt-api-key or add to authinfo"))
     (let* ((params `(("part" . "snippet,contentDetails")
                      ("playlistId" . ,playlist-id)
-                     ("maxResults" . ,(number-to-string youtube-playlist-max-results))
+                     ("maxResults" . ,(number-to-string youtube-gt-max-results))
                      ("key" . ,api-key)))
            (params (if page-token
                        (cons `("pageToken" . ,page-token) params)
                      params))
-           (url (youtube-playlist--api-url "playlistItems" params)))
-      (youtube-playlist--fetch-json url))))
+           (url (youtube-gt--api-url "playlistItems" params)))
+      (youtube-gt--fetch-json url))))
 
-(defun youtube-playlist--fetch-video-details (video-ids)
+(defun youtube-gt--fetch-video-details (video-ids)
   "Fetch video details (duration) for VIDEO-IDS list."
-  (let ((api-key (youtube-playlist--get-api-key)))
+  (let ((api-key (youtube-gt--get-api-key)))
     (unless api-key
       (error "YouTube API key not set"))
     (let* ((ids-string (mapconcat 'identity video-ids ","))
            (params `(("part" . "contentDetails")
                      ("id" . ,ids-string)
                      ("key" . ,api-key)))
-           (url (youtube-playlist--api-url "videos" params)))
-      (youtube-playlist--fetch-json url))))
+           (url (youtube-gt--api-url "videos" params)))
+      (youtube-gt--fetch-json url))))
 
-(defun youtube-playlist--parse-video-from-item (item duration-alist)
+(defun youtube-gt--fetch-uploads-playlist-id (handle)
+  "Fetch the uploads playlist ID for a channel HANDLE.
+HANDLE should be in the format @username."
+  (let ((api-key (youtube-gt--get-api-key)))
+    (unless api-key
+      (error "YouTube API key not set"))
+    (let* ((params `(("part" . "contentDetails")
+                     ("forHandle" . ,handle)
+                     ("key" . ,api-key)))
+           (url (youtube-gt--api-url "channels" params))
+           (response (youtube-gt--fetch-json url))
+           (items (cdr (assoc 'items response))))
+      (unless items
+        (error "Channel not found: %s" handle))
+      (let* ((channel (car items))
+             (content-details (cdr (assoc 'contentDetails channel)))
+             (related-playlists (cdr (assoc 'relatedPlaylists content-details)))
+             (uploads (cdr (assoc 'uploads related-playlists))))
+        (unless uploads
+          (error "Could not find uploads playlist for channel: %s" handle))
+        uploads))))
+
+(defun youtube-gt--parse-video-from-item (item duration-alist)
   "Parse a video alist from playlist ITEM and DURATION-ALIST."
   (let* ((snippet (cdr (assoc 'snippet item)))
          (content-details (cdr (assoc 'contentDetails item)))
          (video-id (cdr (assoc 'videoId content-details)))
-         (title (cdr (assoc 'title snippet)))
+         (raw-title (cdr (assoc 'title snippet)))
+         ;; Replace | with : to avoid breaking org table formatting
+         (title (replace-regexp-in-string "|" ":" raw-title))
          (published (cdr (assoc 'publishedAt snippet)))
          (duration (cdr (assoc (intern video-id) duration-alist))))
     `((id . ,video-id)
       (title . ,title)
       (duration . ,duration)
-      (published . ,(youtube-playlist--format-date published))
-      (url . ,(youtube-playlist--make-video-url video-id)))))
+      (published . ,(youtube-gt--format-date published))
+      (url . ,(youtube-gt--make-video-url video-id)))))
 
-(defun youtube-playlist--fetch-all-videos (playlist-id)
+(defun youtube-gt--chunk-list (list size)
+  "Split LIST into chunks of SIZE elements."
+  (let ((result '()))
+    (while list
+      (push (cl-subseq list 0 (min size (length list))) result)
+      (setq list (nthcdr size list)))
+    (nreverse result)))
+
+(defun youtube-gt--fetch-all-videos (playlist-id)
   "Fetch all videos from PLAYLIST-ID, handling pagination.
 Returns list of video alists, ordered oldest to newest."
   (let ((videos '())
         (next-page-token t))
     ;; Fetch all pages
     (while next-page-token
-      (let* ((response (youtube-playlist--fetch-playlist-items
+      (let* ((response (youtube-gt--fetch-playlist-items
                         playlist-id
                         (when (stringp next-page-token) next-page-token)))
              (items (cdr (assoc 'items response))))
@@ -244,27 +319,32 @@ Returns list of video alists, ordered oldest to newest."
                                 nil)))  ; Keep this item (first occurrence)
                           videos)))
 
-      ;; Fetch durations in batches
+      ;; Fetch durations in batches of 50 (API limit)
       (let* ((video-ids (mapcar (lambda (item)
                                   (cdr (assoc 'videoId
                                              (cdr (assoc 'contentDetails item)))))
                                 unique-videos))
-             (duration-response (youtube-playlist--fetch-video-details video-ids))
-             (duration-items (cdr (assoc 'items duration-response)))
-             (duration-alist (mapcar (lambda (item)
-                                       (let* ((id (cdr (assoc 'id item)))
-                                              (content (cdr (assoc 'contentDetails item)))
-                                              (duration (cdr (assoc 'duration content))))
-                                         (cons (intern id) duration)))
-                                     duration-items)))
+             (id-chunks (youtube-gt--chunk-list video-ids 50))
+             (duration-alist
+              (apply #'append
+                     (mapcar (lambda (chunk)
+                               (let* ((response (youtube-gt--fetch-video-details chunk))
+                                      (items (cdr (assoc 'items response))))
+                                 (mapcar (lambda (item)
+                                           (let* ((id (cdr (assoc 'id item)))
+                                                  (content (cdr (assoc 'contentDetails item)))
+                                                  (duration (cdr (assoc 'duration content))))
+                                             (cons (intern id) duration)))
+                                         items)))
+                             id-chunks))))
         ;; Parse videos and reverse to get oldest-first order
         (reverse (mapcar (lambda (item)
-                           (youtube-playlist--parse-video-from-item item duration-alist))
+                           (youtube-gt--parse-video-from-item item duration-alist))
                          unique-videos))))))
 
 ;;; Table Parsing Functions
 
-(defun youtube-playlist--find-table-after-point ()
+(defun youtube-gt--find-table-after-point ()
   "Find org table after point, return (start . end) positions or nil."
   (save-excursion
     (when (re-search-forward "^[[:space:]]*|" nil t)
@@ -276,7 +356,7 @@ Returns list of video alists, ordered oldest to newest."
           (forward-line 1))
         (cons start (point))))))
 
-(defun youtube-playlist--parse-table-row (row-string)
+(defun youtube-gt--parse-table-row (row-string)
   "Parse an org table ROW-STRING into a table row alist.
 Returns nil if row is a separator."
   (when (and row-string
@@ -303,7 +383,7 @@ Returns nil if row is a separator."
             (video-id . ,video-id)
             (title . ,title)))))))
 
-(defun youtube-playlist--parse-table (start end)
+(defun youtube-gt--parse-table (start end)
   "Parse org table between START and END positions.
 Returns list of table row alists."
   (save-excursion
@@ -313,7 +393,7 @@ Returns list of table row alists."
         (let* ((line (buffer-substring-no-properties
                       (line-beginning-position)
                       (line-end-position)))
-               (row (youtube-playlist--parse-table-row line)))
+               (row (youtube-gt--parse-table-row line)))
           (when row
             (push row rows)))
         (forward-line 1))
@@ -321,12 +401,12 @@ Returns list of table row alists."
 
 ;;; Table Generation Functions
 
-(defun youtube-playlist--video-to-row (index video)
+(defun youtube-gt--video-to-row (index video)
   "Convert VIDEO alist to table row alist with INDEX."
   (list (cons 'index (number-to-string index))
         (cons 'note1 (copy-sequence ""))
         (cons 'note2 (copy-sequence ""))
-        (cons 'duration (youtube-playlist--format-duration (cdr (assoc 'duration video))))
+        (cons 'duration (youtube-gt--format-duration (cdr (assoc 'duration video))))
         (cons 'published (cdr (assoc 'published video)))
         (cons 'url (format "[[%s][%s]]"
                            (cdr (assoc 'url video))
@@ -334,18 +414,18 @@ Returns list of table row alists."
         (cons 'video-id (cdr (assoc 'id video)))
         (cons 'title (cdr (assoc 'title video)))))
 
-(defun youtube-playlist--row-to-string (row)
+(defun youtube-gt--row-to-string (row)
   "Convert table ROW alist to org table row string."
-  (format "| %s | %s | %s | %s | %s | %s | %s |"
-          (string-pad (cdr (assoc 'index row)) 2)
+  (format "| %-2s | %s | %s | %5s | %s | %s | %s |"
+          (cdr (assoc 'index row))
           (cdr (assoc 'note1 row))
           (cdr (assoc 'note2 row))
-          (string-pad (cdr (assoc 'duration row)) 5 32 t)
+          (cdr (assoc 'duration row))
           (cdr (assoc 'published row))
           (cdr (assoc 'url row))
           (cdr (assoc 'title row))))
 
-(defun youtube-playlist--merge-rows (old-rows new-rows)
+(defun youtube-gt--merge-rows (old-rows new-rows)
   "Merge OLD-ROWS with NEW-ROWS, preserving manual notes.
 Videos no longer in playlist have index set to NA.
 Returns merged list of table row alists."
@@ -379,18 +459,20 @@ Returns merged list of table row alists."
 
     (nreverse result)))
 
-(defun youtube-playlist--generate-table-string (rows)
+(defun youtube-gt--generate-table-string (rows)
   "Generate org table string from ROWS list."
-  (mapconcat 'youtube-playlist--row-to-string rows "\n"))
+  (mapconcat 'youtube-gt--row-to-string rows "\n"))
 
 ;;; Update Functions
 
-(defun youtube-playlist--update-at-point ()
-  "Update YouTube playlist table at current #+YOUTUBE_UPDATE: line.
+(defun youtube-gt--update-at-point ()
+  "Update YouTube playlist table at current directive line.
 Returns t if successful, nil otherwise."
   (save-excursion
     (beginning-of-line)
-    (when (looking-at "^[[:space:]]*#\\+YOUTUBE_UPDATE:[[:space:]]+\\(.+\\)$")
+    (when (looking-at (concat "^[[:space:]]*"
+                              (regexp-quote youtube-gt-directive)
+                              ":[[:space:]]+\\(.+\\)$"))
       (let* ((line (string-trim (match-string 1)))
              ;; Parse offset parameter (e.g., ":offset=319")
              (offset (if (string-match ":offset=\\([0-9]+\\)" line)
@@ -398,14 +480,22 @@ Returns t if successful, nil otherwise."
                        0))
              ;; Remove offset parameter from URL for parsing
              (url (replace-regexp-in-string ":offset=[0-9]+" "" line))
-             (playlist-id (youtube-playlist--extract-playlist-id url)))
+             ;; Try to extract playlist ID, or get it from channel handle
+             (playlist-id (youtube-gt--extract-playlist-id url))
+             (channel-handle (unless playlist-id
+                               (youtube-gt--extract-channel-handle url))))
+        ;; If we have a channel handle, fetch its uploads playlist ID
+        (when (and channel-handle (not playlist-id))
+          (message "Fetching channel info for %s..." channel-handle)
+          (setq playlist-id (youtube-gt--fetch-uploads-playlist-id channel-handle)))
+
         (unless playlist-id
-          (error "Could not extract playlist ID from: %s" url))
+          (error "Could not extract playlist ID or channel handle from: %s" url))
 
         (if (> offset 0)
             (message "Fetching playlist %s (skipping first %d videos)..." playlist-id offset)
           (message "Fetching playlist %s..." playlist-id))
-        (let* ((all-videos (youtube-playlist--fetch-all-videos playlist-id))
+        (let* ((all-videos (youtube-gt--fetch-all-videos playlist-id))
                ;; Apply offset: skip the first N videos
                (videos (if (> offset 0)
                            (nthcdr offset all-videos)
@@ -413,7 +503,7 @@ Returns t if successful, nil otherwise."
                (new-rows (let ((index offset))
                            (mapcar (lambda (video)
                                      (prog1
-                                         (youtube-playlist--video-to-row index video)
+                                         (youtube-gt--video-to-row index video)
                                        (setq index (1+ index))))
                                    videos)))
                (old-rows nil)
@@ -421,11 +511,11 @@ Returns t if successful, nil otherwise."
 
           ;; Check if table exists after this line
           (forward-line 1)
-          (setq table-bounds (youtube-playlist--find-table-after-point))
+          (setq table-bounds (youtube-gt--find-table-after-point))
 
           (when table-bounds
             ;; Parse existing table
-            (setq old-rows (youtube-playlist--parse-table
+            (setq old-rows (youtube-gt--parse-table
                            (car table-bounds)
                            (cdr table-bounds)))
             ;; Delete old table
@@ -433,30 +523,33 @@ Returns t if successful, nil otherwise."
 
           ;; Merge or use new rows
           (let* ((final-rows (if old-rows
-                                 (youtube-playlist--merge-rows old-rows new-rows)
+                                 (youtube-gt--merge-rows old-rows new-rows)
                                new-rows))
-                 (table-string (youtube-playlist--generate-table-string final-rows)))
+                 (table-string (youtube-gt--generate-table-string final-rows)))
             ;; Insert new table
             (insert table-string "\n")
             (message "Updated playlist with %d videos" (length videos))
             t))))))
 
 ;;;###autoload
-(defun youtube-playlist-update-all ()
+(defun youtube-gt-update-all ()
   "Update all YouTube playlist tables in the current buffer.
-Scans for #+YOUTUBE_UPDATE: directives and updates their tables."
+Scans for directives matching `youtube-gt-directive' and updates their tables."
   (interactive)
   (save-excursion
     (goto-char (point-min))
-    (let ((count 0))
-      (while (re-search-forward "^[[:space:]]*#\\+YOUTUBE_UPDATE:" nil t)
+    (let ((count 0)
+          (pattern (concat "^[[:space:]]*"
+                           (regexp-quote youtube-gt-directive)
+                           ":")))
+      (while (re-search-forward pattern nil t)
         (beginning-of-line)
-        (when (youtube-playlist--update-at-point)
+        (when (youtube-gt--update-at-point)
           (setq count (1+ count)))
         ;; Move past this directive to avoid re-processing
         (forward-line 1))
       (message "Updated %d playlist%s" count (if (= count 1) "" "s")))))
 
-(provide 'youtube-playlist)
+(provide 'youtube-gt)
 
-;;; youtube-playlist.el ends here
+;;; youtube-gt.el ends here
