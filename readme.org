@@ -12,15 +12,24 @@ files.
 
 * Features
 
-- Fetches playlist data from YouTube Data API v3
-- *Channel support* — use channel URLs like =@username= to get all uploads
-- Generates formatted org-mode tables with video information
-- Preserves manual notes when updating tables
-- Marks removed videos as "NA" instead of deleting them
-- Lists videos from oldest to newest
-- *Offset parameter* to skip the first N videos from a playlist
-- Automatic deduplication of videos (keeps first occurrence)
-- Full UTF-8 support for international characters (Japanese, emojis, etc.)
+- Turn any YouTube playlist or channel URL into an org-mode table that
+  refreshes with a single command.
+- Two update commands: buffer-wide (=youtube-gt-update-all=) or just
+  the single playlist at point (=youtube-gt-update-at-point=).
+- Columns 2 and 3 are yours: use them for =watched=, =to-review=,
+  ratings, priorities, running commentary --- whatever fits your
+  workflow.  Annotations survive every update.
+- A row you annotated stays in the table even after the video leaves
+  the current view --- removed from the playlist, or excluded by a
+  later change to =:offset= / =:min-length=.  Its index becomes =NA=
+  so it stands out, but its annotations are never silently lost.
+  Unannotated rows that fall out of view drop away, so the table
+  never grows into noise.
+- Per-directive filters: =:offset=N= (skip the first N videos) and
+  =:min-length=N= (keep only videos of at least N minutes).  Combine
+  either way; malformed forms are rejected before any API call.
+- Works uniformly on individual playlists and on whole channels
+  (=@handle= URLs are resolved to the channel's uploads playlist).
 
 * Installation
 
@@ -93,28 +102,52 @@ playlist URL or channel URL:
 
 This fetches all uploaded videos from the channel's uploads playlist.
 
-*Optional: use offset parameter to skip videos*
+*Optional parameters*
 
-Skip the first N videos from a playlist using the =:offset=N= parameter:
+Append =:name=value= parameters directly to the URL (or after a
+space).  Each value must be an integer.  Two parameters are recognized:
+
+- =:offset=N= — skip the first =N= videos from the playlist and start
+  the index at =N=.
+- =:min-length=N= — keep only videos whose duration is at least =N=
+  minutes.  Videos with unknown duration are excluded.  Filtered
+  videos keep their original position as their index, so gaps in the
+  index column reflect where a video sits in the underlying playlist.
+
+Both parameters can be combined in either order:
 
 #+begin_src org
-,* Show only recent videos (skip first 100)
+,* Show only recent long videos (skip first 100, keep >= 30 minutes)
 
-,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt:offset=100
+,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt:offset=100:min-length=30
 #+end_src
 
-This skips the first 100 videos and displays only videos 100 onwards.
-The index column starts from the offset value (100 in this example).
+Parameter values must use =:name=value= exactly (no space between
+=:name= and the value).  Whitespace before the =:= is allowed.
+Malformed forms (=:offset 0=, =:min-length=abc=, or an unknown
+=:foo=1=) are rejected with a =user-error= before any API call is
+made.
 
 ** 2. Generate/Update Tables
 
-Run the update command:
+Two interactive commands are available:
 
-#+begin_example
-M-x youtube-gt-update-all
-#+end_example
+- =M-x youtube-gt-update-all= — update every =#+YOUTUBE-GT_UPDATE:=
+  directive in the current buffer.
+- =M-x youtube-gt-update-at-point= — update only the single directive
+  associated with point.  Two positions are recognized:
+  1. Point is on the =#+YOUTUBE-GT_UPDATE:= line itself.
+  2. Point is anywhere inside a table whose immediately-preceding
+     line is a =#+YOUTUBE-GT_UPDATE:= directive.
 
-This generates a table below the directive:
+  Any other position, or a table not directly bound to a directive
+  (e.g. a blank line intervenes), signals a =user-error=.  The
+  command does not search backward across unrelated content, so
+  editing a stray region in the buffer never triggers the wrong
+  playlist's update.  Useful in buffers with many playlists where a
+  full-buffer update would be slow or burn extra API quota.
+
+Either command generates a table below its directive:
 
 #+begin_src org
 ,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
@@ -131,21 +164,25 @@ The second and third columns are reserved for manual notes:
 | 1  |         | to-review | 12:45 | 2024-01-20 | [[...][...]] | Another Video |
 #+end_src
 
-These notes are *preserved* on the next =youtube-gt-update-all= run.
+These notes are *preserved* on every update, from either command.
 
 ** 4. Update Behavior
 
-- New videos are added with sequential indices
-- Existing videos retain their manual notes
-- Videos removed from the playlist are marked with index "NA" but kept
-  in the table
-- Video metadata (title, date, duration) is refreshed
+- New videos are added with their playlist positions as indices.
+- Existing videos retain their manual notes.
+- A row that leaves the current view --- because it was filtered out
+  by =:offset= / =:min-length= or removed from the playlist --- is
+  kept in the table with its index changed to =NA= *only when it
+  carries an annotation* in column 2 or 3.  Unannotated rows that
+  fall out of view are silently dropped, so tightening a filter
+  cleans up the table instead of accumulating rows.
+- Video metadata (title, date, duration) is refreshed on every update.
 
 * Table Format
 
 | Column | Description                                      | Example                   |
 |--------+--------------------------------------------------+---------------------------|
-| 1      | Video index (0-based) or "NA" for removed videos | =0=, =1=, =NA=            |
+| 1      | Playlist position (0-based); =NA= for annotated rows now out of view | =0=, =1=, =NA=            |
 | 2      | Manual note column 1                             | =watched=                 |
 | 3      | Manual note column 2                             | =important=               |
 | 4      | Video duration                                   | =7:13=, =1:23:45=         |
@@ -165,6 +202,26 @@ These notes are *preserved* on the next =youtube-gt-update-all= run.
 
 #+begin_src elisp
 (setq youtube-gt-max-results 50)  ; Default: 50
+#+end_src
+
+** Directive Prefix
+
+The line prefix scanned in each buffer.  Change it if
+=#+YOUTUBE-GT_UPDATE:= collides with something else in your setup;
+existing directives in your files must be renamed to match.
+
+#+begin_src elisp
+(setq youtube-gt-directive "#+YOUTUBE-GT_UPDATE")  ; Default
+#+end_src
+
+** Authinfo Lookup Coordinates
+
+Host and login used to look up the API key in authinfo.  Change these
+if your =~/.authinfo.gpg= entry uses a different machine or user name.
+
+#+begin_src elisp
+(setq youtube-gt-host-key "youtube.com")  ; Default
+(setq youtube-gt-user-name "dmg")         ; Default
 #+end_src
 
 * Requirements

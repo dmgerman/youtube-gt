@@ -130,45 +130,57 @@ then falls back to `youtube-gt-api-key'."
 ;;; Utility Functions
 
 (defun youtube-gt--extract-playlist-id (url)
-  "Extract playlist ID from YouTube URL."
-  (when (string-match "list=\\([^&]+\\)" url)
+  "Extract playlist ID from URL.
+Match the `list=' query parameter and stop at the first non-ID
+character; YouTube playlist IDs are limited to letters, digits,
+underscore, and dash.  Return nil when no ID is present."
+  (when (string-match "list=\\([A-Za-z0-9_-]+\\)" url)
     (match-string 1 url)))
 
 (defun youtube-gt--extract-channel-handle (url)
-  "Extract channel handle from YouTube URL like @username.
-Returns the handle with @ prefix, or nil if not a channel URL."
-  (when (string-match "youtube\\.com/@\\([^/]+\\)" url)
+  "Extract the @handle from a channel URL.
+Match `youtube.com/@' and stop at any character not permitted in a
+YouTube handle (letters, digits, underscore, dash, dot).  Return
+the handle with its leading `@', or nil when URL is not a channel URL."
+  (when (string-match "youtube\\.com/@\\([A-Za-z0-9_.-]+\\)" url)
     (concat "@" (substring-no-properties (match-string 1 url)))))
 
 (defun youtube-gt--extract-video-id (url)
   "Extract video ID from YouTube URL."
-  (when (string-match "watch?v=\\([^&]+\\)" url)
+  (when (string-match "watch\\?v=\\([^&]+\\)" url)
     (match-string 1 url)))
+
+(defun youtube-gt--iso8601-to-seconds (iso8601-duration)
+  "Parse ISO8601-DURATION (e.g., PT1H2M3S) into total seconds.
+Return nil when ISO8601-DURATION is nil or unparseable."
+  (when (and iso8601-duration
+             (string-match
+              "PT\\(?:\\([0-9]+\\)H\\)?\\(?:\\([0-9]+\\)M\\)?\\(?:\\([0-9]+\\)S\\)?"
+              iso8601-duration))
+    (let ((h (if (match-string 1 iso8601-duration)
+                 (string-to-number (match-string 1 iso8601-duration)) 0))
+          (m (if (match-string 2 iso8601-duration)
+                 (string-to-number (match-string 2 iso8601-duration)) 0))
+          (s (if (match-string 3 iso8601-duration)
+                 (string-to-number (match-string 3 iso8601-duration)) 0)))
+      (+ (* 3600 h) (* 60 m) s))))
 
 (defun youtube-gt--format-duration (iso8601-duration)
   "Convert ISO8601-DURATION (e.g., PT1H2M3S) to HH:MM:SS format.
 Return \"N/A\" if ISO8601-DURATION is nil or invalid."
-  (if (not iso8601-duration)
-      "N/A"
-    (let ((duration iso8601-duration)
-          (hours 0)
-          (minutes 0)
-          (seconds 0))
-      ;; Parse PT1H2M3S format
-      (when (string-match "PT\\(?:\\([0-9]+\\)H\\)?\\(?:\\([0-9]+\\)M\\)?\\(?:\\([0-9]+\\)S\\)?" duration)
-        (setq hours (if (match-string 1 duration)
-                        (string-to-number (match-string 1 duration))
-                      0))
-        (setq minutes (if (match-string 2 duration)
-                          (string-to-number (match-string 2 duration))
-                        0))
-        (setq seconds (if (match-string 3 duration)
-                          (string-to-number (match-string 3 duration))
-                        0)))
-      ;; Format as HH:MM:SS or MM:SS
-      (if (> hours 0)
-          (format "%d:%02d:%02d" hours minutes seconds)
-        (format "%d:%02d" minutes seconds)))))
+  (let ((total (youtube-gt--iso8601-to-seconds iso8601-duration)))
+    (if (not total)
+        "N/A"
+      (let ((hours (/ total 3600))
+            (minutes (/ (% total 3600) 60))
+            (seconds (% total 60)))
+        (if (> hours 0)
+            (format "%d:%02d:%02d" hours minutes seconds)
+          (format "%d:%02d" minutes seconds))))))
+
+(defun youtube-gt--video-duration-seconds (video)
+  "Return VIDEO's duration in seconds, or nil when unknown."
+  (youtube-gt--iso8601-to-seconds (cdr (assoc 'duration video))))
 
 (defun youtube-gt--format-date (iso8601-date)
   "Extract and format the date from ISO8601-DATE to YYYY-MM-DD.
@@ -425,10 +437,29 @@ Returns list of table row alists."
           (cdr (assoc 'url row))
           (cdr (assoc 'title row))))
 
+(defun youtube-gt--row-annotated-p (row)
+  "Return non-nil when ROW has a non-empty note1 or note2 field.
+Annotations are the user's signal that a row is worth keeping even
+after it falls out of the current fetch (via `:offset', `:min-length',
+or removal from the playlist)."
+  (let ((n1 (cdr (assoc 'note1 row)))
+        (n2 (cdr (assoc 'note2 row))))
+    (or (and n1 (not (string-empty-p n1)))
+        (and n2 (not (string-empty-p n2))))))
+
 (defun youtube-gt--merge-rows (old-rows new-rows)
   "Merge OLD-ROWS with NEW-ROWS, preserving manual notes.
-Videos no longer in playlist have index set to NA.
-Returns merged list of table row alists."
+
+Every NEW-ROWS entry appears in the result with its notes merged in
+from any matching OLD-ROWS entry (matched by video-id).
+
+An OLD-ROWS entry that has no counterpart in NEW-ROWS -- because it
+was filtered out by `:offset' / `:min-length' or removed from the
+playlist -- is kept in the result with its index changed to \"NA\"
+ONLY when it carries an annotation (see `youtube-gt--row-annotated-p').
+Unannotated old rows that fall out of view are silently dropped, so
+tightening a filter cleans up the table instead of accumulating
+noise."
   (let* ((old-by-id (mapcar (lambda (row)
                               (cons (cdr (assoc 'video-id row)) row))
                             old-rows))
@@ -448,12 +479,13 @@ Returns merged list of table row alists."
           (setcdr (assoc 'note2 new-row) (cdr (assoc 'note2 old-row))))
         (push new-row result)))
 
-    ;; Add old rows that are no longer in the playlist (marked as NA)
+    ;; Add old rows that are no longer in the fetch -- but ONLY if the
+    ;; user annotated them.  Unannotated rows just disappear.
     (dolist (old-pair old-by-id)
       (let* ((video-id (car old-pair))
              (old-row (cdr old-pair)))
-        (unless (assoc video-id new-by-id)
-          ;; Mark as NA and add to end
+        (when (and (not (assoc video-id new-by-id))
+                   (youtube-gt--row-annotated-p old-row))
           (setcdr (assoc 'index old-row) "NA")
           (push old-row result))))
 
@@ -465,21 +497,56 @@ Returns merged list of table row alists."
 
 ;;; Update Functions
 
+(defconst youtube-gt--recognized-params '("offset" "min-length")
+  "Directive parameter names accepted after the URL, in `:name=N' form.")
+
+(defun youtube-gt--parse-directive-args (line)
+  "Parse LINE (directive body after the colon) into (URL PARAMS).
+PARAMS is an alist of (SYMBOL . INTEGER) for each recognized
+`:name=N' suffix in LINE.  Return nil when LINE is malformed
+--- when a `:name...' fragment does not match the strict
+`:name=<digits>' shape, when an unknown `:name' is used, or when
+the URL portion is not a single non-whitespace token."
+  (let ((rest line)
+        (params '())
+        (re (concat "[[:space:]]*:\\("
+                    (mapconcat #'regexp-quote
+                               youtube-gt--recognized-params "\\|")
+                    "\\)=\\([0-9]+\\)\\'")))
+    (while (string-match re rest)
+      (push (cons (intern (match-string 1 rest))
+                  (string-to-number (match-string 2 rest)))
+            params)
+      (setq rest (substring rest 0 (match-beginning 0))))
+    (setq rest (string-trim rest))
+    ;; The remainder must be a single non-whitespace URL token.  Any
+    ;; leftover `:name...' fragment means either a malformed value on a
+    ;; recognized name (e.g. `:offset=abc') or an unknown parameter
+    ;; (e.g. `:foo=1'); refuse to guess in either case.  The `://' in
+    ;; the URL scheme is not matched because `/' is not a letter.
+    (when (and (string-match-p "\\`\\S-+\\'" rest)
+               (not (string-match-p ":[a-z][a-z-]*" rest)))
+      (list rest params))))
+
 (defun youtube-gt--update-at-point ()
   "Update YouTube playlist table at current directive line.
-Returns t if successful, nil otherwise."
+Return t on success; return nil when point is not on a directive.
+Signal `user-error' when the directive is malformed."
   (save-excursion
     (beginning-of-line)
     (when (looking-at (concat "^[[:space:]]*"
                               (regexp-quote youtube-gt-directive)
                               ":[[:space:]]+\\(.+\\)$"))
       (let* ((line (string-trim (match-string 1)))
-             ;; Parse offset parameter (e.g., ":offset=319")
-             (offset (if (string-match ":offset=\\([0-9]+\\)" line)
-                         (string-to-number (match-string 1 line))
-                       0))
-             ;; Remove offset parameter from URL for parsing
-             (url (replace-regexp-in-string ":offset=[0-9]+" "" line))
+             (parsed (youtube-gt--parse-directive-args line))
+             (_ (unless parsed
+                  (user-error
+                   "%s: expected \"URL\" optionally followed by \":offset=N\" and/or \":min-length=N\", got: %s"
+                   youtube-gt-directive line)))
+             (url (car parsed))
+             (params (cadr parsed))
+             (offset (or (cdr (assq 'offset params)) 0))
+             (min-length (or (cdr (assq 'min-length params)) 0))
              ;; Try to extract playlist ID, or get it from channel handle
              (playlist-id (youtube-gt--extract-playlist-id url))
              (channel-handle (unless playlist-id
@@ -492,20 +559,40 @@ Returns t if successful, nil otherwise."
         (unless playlist-id
           (error "Could not extract playlist ID or channel handle from: %s" url))
 
-        (if (> offset 0)
-            (message "Fetching playlist %s (skipping first %d videos)..." playlist-id offset)
-          (message "Fetching playlist %s..." playlist-id))
+        (cond
+         ((and (> offset 0) (> min-length 0))
+          (message "Fetching playlist %s (skipping %d, keeping >=%dm)..."
+                   playlist-id offset min-length))
+         ((> offset 0)
+          (message "Fetching playlist %s (skipping first %d videos)..."
+                   playlist-id offset))
+         ((> min-length 0)
+          (message "Fetching playlist %s (keeping videos >=%d minutes)..."
+                   playlist-id min-length))
+         (t
+          (message "Fetching playlist %s..." playlist-id)))
         (let* ((all-videos (youtube-gt--fetch-all-videos playlist-id))
-               ;; Apply offset: skip the first N videos
-               (videos (if (> offset 0)
-                           (nthcdr offset all-videos)
-                         all-videos))
-               (new-rows (let ((index offset))
-                           (mapcar (lambda (video)
-                                     (prog1
-                                         (youtube-gt--video-to-row index video)
-                                       (setq index (1+ index))))
-                                   videos)))
+               (after-offset (if (> offset 0)
+                                 (nthcdr offset all-videos)
+                               all-videos))
+               ;; Pair each surviving video with its offset-adjusted
+               ;; index BEFORE filtering, so positional indices remain
+               ;; meaningful when `min-length' drops middle rows.
+               (indexed (seq-map-indexed
+                         (lambda (v i) (cons (+ i offset) v))
+                         after-offset))
+               (survivors (if (> min-length 0)
+                              (seq-filter
+                               (lambda (pair)
+                                 (let ((secs (youtube-gt--video-duration-seconds
+                                              (cdr pair))))
+                                   (and secs (>= secs (* 60 min-length)))))
+                               indexed)
+                            indexed))
+               (new-rows (mapcar (lambda (pair)
+                                   (youtube-gt--video-to-row (car pair)
+                                                             (cdr pair)))
+                                 survivors))
                (old-rows nil)
                (table-bounds nil))
 
@@ -528,8 +615,44 @@ Returns t if successful, nil otherwise."
                  (table-string (youtube-gt--generate-table-string final-rows)))
             ;; Insert new table
             (insert table-string "\n")
-            (message "Updated playlist with %d videos" (length videos))
+            (message "Updated playlist with %d videos" (length survivors))
             t))))))
+
+;;;###autoload
+(defun youtube-gt-update-at-point ()
+  "Update the single YouTube playlist table associated with point.
+The directive must be reachable without stepping across unrelated
+content.  Two shapes are recognized:
+
+  1. Point is on a `youtube-gt-directive' line -- update that table.
+  2. Point is inside an org table whose line immediately above (the
+     line at position (1- (org-table-begin))) is a `youtube-gt-directive'
+     line -- update that table.
+
+Any other position, or a table whose immediate predecessor line is
+not a directive, signals a `user-error'."
+  (interactive)
+  (let ((pattern (concat "^[[:space:]]*"
+                         (regexp-quote youtube-gt-directive)
+                         ":")))
+    (save-excursion
+      (beginning-of-line)
+      (cond
+       ((looking-at pattern)
+        (unless (youtube-gt--update-at-point)
+          (user-error "Failed to update playlist at point")))
+       ((org-at-table-p)
+        (goto-char (org-table-begin))
+        (forward-line -1)
+        (beginning-of-line)
+        (unless (looking-at pattern)
+          (user-error "Table is not immediately preceded by a %s directive"
+                      youtube-gt-directive))
+        (unless (youtube-gt--update-at-point)
+          (user-error "Failed to update playlist at point")))
+       (t
+        (user-error "Point is neither on a %s directive nor in its table"
+                    youtube-gt-directive))))))
 
 ;;;###autoload
 (defun youtube-gt-update-all ()

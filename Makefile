@@ -6,7 +6,12 @@
 #   make checkdoc      — checkdoc every youtube-gt*.el (errors on any warning)
 #   make check-declare — verify declare-function file arguments
 #   make compile       — byte-compile every youtube-gt*.el (errors on warning)
-#   make test          — run ERT test suite (no-op if none present)
+#   make test          — run offline ERT tests (test/youtube-gt-test.el)
+#   make test-live     — run live integration tests against YouTube
+#                        (test/youtube-gt-live-test.el).  Opt-in: hits
+#                        the real API using the key from authinfo.  Not
+#                        wired into `check' or CI.
+#   make test-all      — test + test-live
 #   make info          — rebuild youtube-gt.info and dir from readme.org
 #                        (both are committed artifacts, not cleaned).
 #   make clean         — remove every *.elc
@@ -53,9 +58,9 @@ define assert-emacs
 	fi
 endef
 
-.PHONY: default lint checkdoc check-declare compile test clean check \
-        check-ci check-30 check-31 check-all checkdoc-30 checkdoc-31 \
-        checkdoc-all info help
+.PHONY: default lint checkdoc check-declare compile test test-live \
+        test-all clean check check-ci check-30 check-31 check-all \
+        checkdoc-30 checkdoc-31 checkdoc-all info help
 
 default: compile info
 
@@ -120,9 +125,24 @@ compile: $(ELPA_DIR)/.installed
 	    -f batch-byte-compile $$f; \
 	done
 
-# No test suite yet; keep the target so CI stays uniform across projects.
+# Offline ERT suite.  No network, no API key required.  Wired into
+# `check' and the CI workflow.
 test:
-	@echo "No ERT test suite present.  Add tests under ./test/ and update this target."
+	$(EMACS) -Q --batch -L . \
+	  -l test/youtube-gt-test.el \
+	  -f ert-run-tests-batch-and-exit
+
+# Live integration tests against the real YouTube API.  Reads the key
+# from authinfo via `youtube-gt--get-api-key'.  Individual tests skip
+# themselves when the key is unavailable, so `make test-live' with no
+# key is a no-op rather than a failure.  NOT wired into `check' or CI
+# (MELPA-facing runs never carry a key, and quota is finite).
+test-live:
+	$(EMACS) -Q --batch -L . \
+	  -l test/youtube-gt-live-test.el \
+	  -f ert-run-tests-batch-and-exit
+
+test-all: test test-live
 
 clean:
 	rm -f *.elc
@@ -152,7 +172,7 @@ $(INFO_FILE): readme.org
 $(INFO_DIR): $(INFO_FILE)
 	install-info --info-file=$(INFO_FILE) --dir-file=$(INFO_DIR)
 
-check: compile lint checkdoc check-declare info
+check: compile lint checkdoc check-declare test info
 
 # Per-version target family.  `make check-all' is the pre-push guard.
 check-30:      ; $(call assert-emacs,EMACS_30) ; $(MAKE) EMACS=$(EMACS_30) check

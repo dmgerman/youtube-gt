@@ -4,11 +4,11 @@
 
 * Japanese Learning Videos
 
-This is an example of using youtube-playlist.el to manage YouTube playlist information.
+This is an example of using youtube-gt.el to manage YouTube playlist information.
 
-After setting up your API key, run =M-x youtube-playlist-update-all= to generate/update the table below.
+After setting up your API key, run =M-x youtube-gt-update-all= to generate/update the table below.
 
-#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
+#+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt
 
 * Notes
 
@@ -23,11 +23,11 @@ You can have multiple playlists in the same file:
 
 ** Playlist 1
 
-#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID_1
+#+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID_1
 
 ** Playlist 2
 
-#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID_2
+#+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID_2
 
 * Using Offset Parameter
 
@@ -35,13 +35,13 @@ Skip the first N videos from a playlist:
 
 ** Show only recent videos (skip first 50)
 
-#+YOUTUBE_UPDATE: https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID:offset=50
+#+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID:offset=50
 
 This is useful for large playlists where you only want to track recent additions.
 
 * Tips
 
-1. Run =M-x youtube-playlist-update-all= to update all playlists in the buffer
+1. Run =M-x youtube-gt-update-all= to update all playlists in the buffer
 2. Add your notes in columns 2 and 3 - they'll be preserved across updates
 3. The table shows videos from oldest to newest
 4. Video metadata (title, duration, date) is automatically refreshed on each update
