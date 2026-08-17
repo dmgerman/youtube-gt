@@ -21,3 +21,5 @@ my-playlists.org
 # Backup files
 *.bak
 *.orig
+ignore
+.claude
