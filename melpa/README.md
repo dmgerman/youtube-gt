@@ -27,7 +27,7 @@ installed package.
 
 ## Package-Requires
 
-`youtube-gt` declares only `(emacs "27.1")`.  All other dependencies
+`youtube-gt` declares only `(emacs "30.1")`.  All other dependencies
 (`org`, `url`, `json`, `iso8601`, `auth-source`, `cl-lib`) are built
 into Emacs and do not need to be listed.
 

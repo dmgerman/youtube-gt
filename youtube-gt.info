@@ -335,7 +335,7 @@ File: youtube-gt.info,  Node: Requirements,  Next: API Quota,  Prev: Configurati
 Requirements
 ************
 
-   • Emacs 27.1+
+   • Emacs 30.1+
    • Internet connection for API access
    • YouTube Data API v3 key
 

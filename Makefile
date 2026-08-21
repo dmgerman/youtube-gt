@@ -19,15 +19,15 @@
 #   make check-30      — `make check' pinned to $(EMACS_30)
 #   make check-31      — `make check' pinned to $(EMACS_31)
 #   make check-all     — check-30 + check-31 (pre-push guard)
-#   make check-ci      — alias for check-30 (matches CI matrix)
+#   make check-ci      — `make check' under every Emacs in
+#                        $(CI_EMACS_LIST) (the floor and the latest
+#                        release, matching the CI matrix); errors out
+#                        when either binary is absent
 #   make help          — show this table
 #
 # Override the Emacs binary by passing EMACS=path/to/emacs.
 
 EMACS      ?= emacs
-EMACS_30   ?= /opt/homebrew/opt/emacs-plus@30/bin/emacs
-EMACS_31   ?= /opt/homebrew/opt/emacs-plus@31/bin/emacs
-CI_EMACS   ?= $(EMACS_30)
 
 # One-file package; list here to make future splits mechanical.
 EL_FILES = youtube-gt.el
@@ -174,11 +174,39 @@ $(INFO_DIR): $(INFO_FILE)
 
 check: compile lint checkdoc check-declare test info
 
+# CI-mirror check.  EMACS_30 / EMACS_31 are the Package-Requires floor
+# and the latest release, matching the GitHub Actions matrix in
+# .github/workflows/package-lint.yml.  Both are mandatory: a skipped
+# version reports a pass that CI does not agree with, so `check-ci'
+# refuses to run until both are installed.  The default `make check'
+# runs under whatever `emacs' resolves to on PATH and cannot prove
+# multi-version compatibility.
+EMACS_30 ?= /opt/homebrew/opt/emacs-plus@30/bin/emacs
+EMACS_31 ?= /opt/homebrew/opt/emacs-plus@31/bin/emacs
+CI_EMACS_LIST ?= $(EMACS_30) $(EMACS_31)
+
+# Every binary is verified before the first one runs, so a missing
+# install is reported up front rather than after a full pass.
+check-ci:
+	@missing=""; \
+	for e in $(CI_EMACS_LIST); do \
+	  [ -x "$$e" ] || missing="$$missing $$e"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	  echo "check-ci: required Emacs not executable:$$missing"; \
+	  echo "Install both:  brew install emacs-plus@30 emacs-plus@31"; \
+	  echo "Or override:   make check-ci CI_EMACS_LIST=\"/path/to/emacs ...\""; \
+	  exit 1; \
+	fi
+	@for e in $(CI_EMACS_LIST); do \
+	  echo "==> check-ci under $$e ($$($$e --version | head -1))"; \
+	  $(MAKE) EMACS=$$e check || exit 1; \
+	done
+
 # Per-version target family.  `make check-all' is the pre-push guard.
 check-30:      ; $(call assert-emacs,EMACS_30) ; $(MAKE) EMACS=$(EMACS_30) check
 check-31:      ; $(call assert-emacs,EMACS_31) ; $(MAKE) EMACS=$(EMACS_31) check
 check-all:     check-30 check-31
-check-ci:      check-30
 
 checkdoc-30:   ; $(call assert-emacs,EMACS_30) ; $(MAKE) EMACS=$(EMACS_30) checkdoc
 checkdoc-31:   ; $(call assert-emacs,EMACS_31) ; $(MAKE) EMACS=$(EMACS_31) checkdoc

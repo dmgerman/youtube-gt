@@ -226,7 +226,7 @@ if your =~/.authinfo.gpg= entry uses a different machine or user name.
 
 * Requirements
 
-- Emacs 27.1+
+- Emacs 30.1+
 - Internet connection for API access
 - YouTube Data API v3 key
 

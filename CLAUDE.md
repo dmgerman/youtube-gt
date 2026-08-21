@@ -136,7 +136,7 @@ emacsclient -e '(with-current-buffer (find-file "test.org") (youtube-gt-update-a
 
 ## Dependencies
 
-- Emacs 27.1+
+- Emacs 30.1+
 - Built-in: `org`, `url`, `json`, `iso8601`, `auth-source`, `cl-lib`
 - External: YouTube Data API v3 key
 
