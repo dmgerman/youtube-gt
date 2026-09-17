@@ -21,7 +21,8 @@ There are other query parameters (see documentation below).
 ,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/@CBCNews/videos  :match="About That"  :newest=10
 #+end_example
 
-Then you run the command: ~youtube-gt-update-all~ then it will create the following.
+Then you run the command: ~youtube-gt-update-all~ then it add below a list of videos that match the :match and :newest expressions. The columns are: number of video in the playlist,
+user column, user column, length, date of publication, link, and title.
 
 #+begin_example
 ,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/@CBCNews/videos  :match="About That"  :newest=10
