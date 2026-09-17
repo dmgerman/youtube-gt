@@ -53,7 +53,8 @@
 Skips the test on network/API failure."
   (condition-case err
       (mapcar (lambda (v) (cdr (assoc 'id v)))
-              (youtube-gt--fetch-all-videos youtube-gt-live-test/playlist-id))
+              (cdr (youtube-gt--fetch-all-videos
+                    youtube-gt-live-test/playlist-id)))
     (error (ert-skip (format "Live fetch failed: %s" (error-message-string err))))))
 
 (defun youtube-gt-live-test--seed-row (index note1 note2 video-id title)
@@ -83,8 +84,11 @@ Skips the test on network/API failure."
 (ert-deftest youtube-gt-live-test/fetch-shape ()
   "The live playlist fetch returns well-formed video alists."
   (youtube-gt-live-test--require-key)
-  (let ((videos (youtube-gt--fetch-all-videos youtube-gt-live-test/playlist-id)))
+  (let* ((result (youtube-gt--fetch-all-videos youtube-gt-live-test/playlist-id))
+         (videos (cdr result)))
     (should (>= (length videos) 1))
+    ;; A complete fetch reports an exact total.
+    (should (equal (car result) (length videos)))
     (dolist (v videos)
       (should (stringp (cdr (assoc 'id v))))
       (should (> (length (cdr (assoc 'id v))) 0))
@@ -102,9 +106,9 @@ Skips the test on network/API failure."
          (vid-a (nth 0 ids))
          (vid-b (nth 2 ids)))
     (cl-letf (((symbol-function 'youtube-gt--fetch-all-videos)
-               (let ((fetched (youtube-gt--fetch-all-videos
-                               youtube-gt-live-test/playlist-id)))
-                 (lambda (_id) fetched))))
+               (let ((fetched (cdr (youtube-gt--fetch-all-videos
+                                    youtube-gt-live-test/playlist-id))))
+                 (lambda (_id &rest _) (cons (length fetched) fetched)))))
       (with-temp-buffer
         (org-mode)
         (insert "#+YOUTUBE-GT_UPDATE: " youtube-gt-live-test/playlist-url "\n")
@@ -125,8 +129,9 @@ Skips the test on network/API failure."
             (should (equal (cdr (assoc 'note1 b)) "todo"))
             (should (equal (cdr (assoc 'note2 b)) "review"))))))))
 
-(ert-deftest youtube-gt-live-test/removed-video-marked-na ()
-  "A seeded video absent from the playlist is preserved with index NA and its note intact."
+(ert-deftest youtube-gt-live-test/removed-video-keeps-index ()
+  "A seeded video absent from the playlist is preserved with its own index
+and its note intact."
   (youtube-gt-live-test--require-key)
   (let* ((ids (youtube-gt-live-test--fetch-ids))
          (_ (when (< (length ids) 1)
@@ -134,9 +139,9 @@ Skips the test on network/API failure."
          (kept-vid (nth 0 ids))
          (gone-vid youtube-gt-live-test/foreign-video-id))
     (cl-letf (((symbol-function 'youtube-gt--fetch-all-videos)
-               (let ((fetched (youtube-gt--fetch-all-videos
-                               youtube-gt-live-test/playlist-id)))
-                 (lambda (_id) fetched))))
+               (let ((fetched (cdr (youtube-gt--fetch-all-videos
+                                    youtube-gt-live-test/playlist-id))))
+                 (lambda (_id &rest _) (cons (length fetched) fetched)))))
       (with-temp-buffer
         (org-mode)
         (insert "#+YOUTUBE-GT_UPDATE: " youtube-gt-live-test/playlist-url "\n")
@@ -147,17 +152,18 @@ Skips the test on network/API failure."
         (youtube-gt-update-all)
         (let* ((rows (youtube-gt-live-test--parse-buffer-rows))
                (by-vid (youtube-gt-live-test--row-by-vid rows)))
-          ;; Row for the foreign video is still in the buffer, marked NA,
-          ;; with its annotation intact.
+          ;; Row for the foreign video is still in the buffer, keeping the
+          ;; index it was seeded with and its annotation intact.
           (let ((gone (cdr (assoc gone-vid by-vid))))
             (should gone)
-            (should (equal (cdr (assoc 'index gone)) "NA"))
+            (should (equal (cdr (assoc 'index gone)) "99"))
             (should (equal (cdr (assoc 'note1 gone)) "keepthis"))
             (should (equal (cdr (assoc 'note2 gone)) "was-here")))
-          ;; The still-present video keeps its note and gets a real index.
+          ;; The still-present video keeps its note and is renumbered by
+          ;; the fetch.
           (let ((kept (cdr (assoc kept-vid by-vid))))
             (should kept)
-            (should (not (equal (cdr (assoc 'index kept)) "NA")))
+            (should (string-match-p "\\`[0-9]+\\'" (cdr (assoc 'index kept))))
             (should (equal (cdr (assoc 'note1 kept)) "still-here"))))))))
 
 (ert-deftest youtube-gt-live-test/partial-seed-fills-missing ()
@@ -173,9 +179,9 @@ without losing the tail annotations."
          (tail-a (nth (- n 2) ids))
          (tail-b (nth (- n 1) ids)))
     (cl-letf (((symbol-function 'youtube-gt--fetch-all-videos)
-               (let ((fetched (youtube-gt--fetch-all-videos
-                               youtube-gt-live-test/playlist-id)))
-                 (lambda (_id) fetched))))
+               (let ((fetched (cdr (youtube-gt--fetch-all-videos
+                                    youtube-gt-live-test/playlist-id))))
+                 (lambda (_id &rest _) (cons (length fetched) fetched)))))
       (with-temp-buffer
         (org-mode)
         (insert "#+YOUTUBE-GT_UPDATE: " youtube-gt-live-test/playlist-url "\n")
@@ -211,8 +217,8 @@ preserves the videos' original playlist positions as indices, and drops
 any video whose duration is unknown."
   (youtube-gt-live-test--require-key)
   (let* ((videos (condition-case err
-                     (youtube-gt--fetch-all-videos
-                      youtube-gt-live-test/playlist-id)
+                     (cdr (youtube-gt--fetch-all-videos
+                           youtube-gt-live-test/playlist-id))
                    (error (ert-skip
                            (format "Live fetch failed: %s"
                                    (error-message-string err))))))
@@ -232,7 +238,7 @@ any video whose duration is unknown."
                    when (and secs (>= secs (* 60 threshold-min)))
                    collect (cons i (cdr (assoc 'id v))))))
     (cl-letf (((symbol-function 'youtube-gt--fetch-all-videos)
-               (lambda (_id) videos)))
+               (lambda (_id &rest _) (cons (length videos) videos))))
       (with-temp-buffer
         (org-mode)
         (insert (format "#+YOUTUBE-GT_UPDATE: %s:min-length=%d\n"
@@ -256,9 +262,9 @@ any video whose duration is unknown."
          (_ (when (<= n offset)
               (ert-skip "playlist too small for offset test"))))
     (cl-letf (((symbol-function 'youtube-gt--fetch-all-videos)
-               (let ((fetched (youtube-gt--fetch-all-videos
-                               youtube-gt-live-test/playlist-id)))
-                 (lambda (_id) fetched))))
+               (let ((fetched (cdr (youtube-gt--fetch-all-videos
+                                    youtube-gt-live-test/playlist-id))))
+                 (lambda (_id &rest _) (cons (length fetched) fetched)))))
       (with-temp-buffer
         (org-mode)
         (insert (format "#+YOUTUBE-GT_UPDATE: %s:offset=%d\n"

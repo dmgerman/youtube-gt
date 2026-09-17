@@ -19,15 +19,21 @@ files.
 - Columns 2 and 3 are yours: use them for =watched=, =to-review=,
   ratings, priorities, running commentary --- whatever fits your
   workflow.  Annotations survive every update.
-- A row you annotated stays in the table even after the video leaves
-  the current view --- removed from the playlist, or excluded by a
-  later change to =:offset= / =:min-length=.  Its index becomes =NA=
-  so it stands out, but its annotations are never silently lost.
-  Unannotated rows that fall out of view drop away, so the table
-  never grows into noise.
-- Per-directive filters: =:offset=N= (skip the first N videos) and
-  =:min-length=N= (keep only videos of at least N minutes).  Combine
-  either way; malformed forms are rejected before any API call.
+- A row you annotated remains in the table even after the video is no
+  longer fetched --- removed from the playlist, or excluded by a later
+  change to a filter.  It keeps the index it already had and its
+  position in the table, so annotations are never silently lost.
+  Unannotated rows that are no longer fetched are removed, so the
+  table does not accumulate obsolete rows.
+- Per-directive filters: =:offset=N= (skip the first N videos),
+  =:newest=N= (keep only the N newest), =:min-length=N= (keep only
+  videos of at least N minutes), =:since=DATE= (keep only videos
+  published on or after DATE), and =:match=REGEXP= (keep only videos
+  whose title matches).  Combine them in any order; malformed forms
+  are rejected before any API call.
+- =:newest= and =:since= stop fetching early, so retrieving a few
+  videos from a 20,000-video channel costs about two requests instead
+  of about 800.
 - Works uniformly on individual playlists and on whole channels
   (=@handle= URLs are resolved to the channel's uploads playlist).
 
@@ -105,28 +111,122 @@ This fetches all uploaded videos from the channel's uploads playlist.
 *Optional parameters*
 
 Append =:name=value= parameters directly to the URL (or after a
-space).  Each value must be an integer.  Two parameters are recognized:
+space).  Five parameters are recognized:
 
 - =:offset=N= — skip the first =N= videos from the playlist and start
   the index at =N=.
+- =:newest=N= — keep only the =N= newest videos (the =N= highest
+  indices).  Cannot be combined with =:offset=, which counts from the
+  opposite end.
 - =:min-length=N= — keep only videos whose duration is at least =N=
-  minutes.  Videos with unknown duration are excluded.  Filtered
-  videos keep their original position as their index, so gaps in the
-  index column reflect where a video sits in the underlying playlist.
+  minutes.  Videos with unknown duration are excluded.
+- =:since=DATE= — keep only videos published on =DATE= or later.
+  =DATE= is written =YYYYMMDD= or =YYYY-MM-DD=.  Videos with an
+  unknown publication date are excluded.
+- =:match=REGEXP= — keep only videos whose title matches =REGEXP=, an
+  Emacs regular expression matched case-insensitively.  Quote the
+  value (=:match="About That"=) whenever it contains spaces; a value
+  with no spaces or quotes may be written bare (=:match=National=).
 
-Both parameters can be combined in either order:
+Filtered videos keep their original position as their index, so gaps
+in the index column reflect where a video sits in the underlying
+playlist.  Index 0 is the *oldest* video; =:newest= therefore yields
+the highest indices, not a fresh numbering from zero.
+
+The filters compose: =:newest= is applied last, to whatever survived
+the others.  So =:newest=10 :match="About That"= means "the 10 newest
+videos whose title matches", not "the videos among the 10 newest that
+match".
+
+Parameters can be combined in any order:
 
 #+begin_src org
-,* Show only recent long videos (skip first 100, keep >= 30 minutes)
+,* Recent long videos (skip first 100, keep >= 30 minutes)
 
 ,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/playlist?list=PLPdNX2arS9MYUGoIp0qogtHZ3fXu46GQt:offset=100:min-length=30
+
+,* One segment of a news channel, this year only
+
+,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/@CBCNews/videos :since=20260101 :match="About That"
+
+,* The 20 most recent uploads of a very large channel
+
+,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/@CBCNews/videos :newest=20
+
+,* The 20 most recent "About That" segments
+
+,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/@CBCNews/videos :newest=20 :match="About That"
 #+end_src
+
+That last directive is the main use of =:newest=.  =@CBCNews= has
+about 20,000 videos, and the three ways of requesting one recurring
+segment differ by two orders of magnitude in cost:
+
+| Directive                    | Requests | Why                                        |
+|------------------------------+----------+--------------------------------------------|
+| =:match="About That"=        | ~800     | Fetches all 20,000 videos, then filters    |
+| =:since=20260101 :match=...= | few      | Stops at the first page predating the date |
+| =:newest=20 :match=...=      | few      | Stops once 20 matches have been found      |
+
+=:newest= limits the number of videos fetched by the number of rows
+requested rather than by the size of the playlist: pagination stops at
+20 matches regardless of how many videos remain unfetched.  =:since=
+limits it by date instead, and combining the two stops at whichever
+condition is met first.
+
+The limitation follows from fetching newest-first: the fewer videos
+match, the more pages must be fetched to find 20 of them.  A segment
+that aired twice in 2019 still requires fetching most of the playlist.
+Add =:since= to bound how far back the search goes.
+
+*Fetching cost*
+
+Videos arrive 50 per request, and durations for those 50 cost one
+more request --- roughly one request per 25 videos, each costing one
+unit of the 10,000-unit daily API quota.  Fetching a 20,000-video
+channel in full is therefore about 800 requests.  That is slow rather
+than expensive: it stays well inside the daily quota, but takes a
+while, and Emacs is blocked for the duration.
+
+=:newest= and =:since= reduce the number of requests.  Pages arrive
+newest-first, so fetching stops as soon as =:newest= has enough
+videos, or as soon as a whole page predates =:since=.  =:newest=20= on
+that same channel costs about two requests.  Two limitations:
+
+- =:newest= combined with a =:match= that few videos satisfy may still
+  fetch most of the playlist before finding =N= matches.
+- Early stopping on =:since= applies only to channel uploads, which
+  are always in date order.  A manually ordered playlist can list an
+  old video before a recent one, so every page of one is fetched.
+
+When fetching stops early, absolute indices come from the playlist
+size the API reports, which can be off by a few on playlists
+containing deleted or private videos.  Fetching in full counts
+exactly.
 
 Parameter values must use =:name=value= exactly (no space between
 =:name= and the value).  Whitespace before the =:= is allowed.
-Malformed forms (=:offset 0=, =:min-length=abc=, or an unknown
-=:foo=1=) are rejected with a =user-error= before any API call is
-made.
+Names are matched case-sensitively and in full.
+
+*Anything after the URL that is not a recognized parameter is
+refused*: the directive signals a =user-error= naming the text it
+could not interpret, and no API call is made.  Nothing is ever
+silently ignored, because ignoring a filter would quietly produce a
+table for the whole unfiltered playlist.  Refused forms include:
+
+| Directive text      | Why                              |
+|---------------------+----------------------------------|
+| =:offset 0=         | Space instead of ~=~             |
+| =:min-length=abc=   | Value is not an integer          |
+| =:since=20261301=   | Month 13 is not a date           |
+| =:match="About=     | Unbalanced quote                 |
+| =:match="[unclosed"= | Invalid regexp                  |
+| =:offst=5=          | Misspelled name                  |
+| =:Offset=5=         | Wrong case                       |
+| =:newest=           | Name with no value               |
+| =:foo=1=            | Unknown name                     |
+| =URL junk=          | Trailing text                    |
+| =:offset=1 :newest=5= | Contradictory: opposite ends   |
 
 ** 2. Generate/Update Tables
 
@@ -170,19 +270,25 @@ These notes are *preserved* on every update, from either command.
 
 - New videos are added with their playlist positions as indices.
 - Existing videos retain their manual notes.
-- A row that leaves the current view --- because it was filtered out
-  by =:offset= / =:min-length= or removed from the playlist --- is
-  kept in the table with its index changed to =NA= *only when it
-  carries an annotation* in column 2 or 3.  Unannotated rows that
-  fall out of view are silently dropped, so tightening a filter
-  cleans up the table instead of accumulating rows.
+- A row that is no longer fetched --- because it was filtered out by a
+  directive parameter or removed from the playlist --- is kept in the
+  table *only when it carries an annotation* in column 2 or 3.  It
+  keeps the index it was last given, and the table is sorted by index,
+  so it remains in the same position instead of moving to the bottom.
+  Unannotated rows that are no longer fetched are removed, so
+  tightening a filter deletes rows from the table rather than adding
+  to it.
+- A preserved row's index records where that video was positioned when
+  it was last fetched.  If the playlist changes, that number can
+  become inaccurate, or duplicate the index of a fetched row; the
+  fetched row's index is the accurate one.
 - Video metadata (title, date, duration) is refreshed on every update.
 
 * Table Format
 
 | Column | Description                                      | Example                   |
 |--------+--------------------------------------------------+---------------------------|
-| 1      | Playlist position (0-based); =NA= for annotated rows now out of view | =0=, =1=, =NA=            |
+| 1      | Playlist position (0-based, oldest first)        | =0=, =1=, =19999=         |
 | 2      | Manual note column 1                             | =watched=                 |
 | 3      | Manual note column 2                             | =important=               |
 | 4      | Video duration                                   | =7:13=, =1:23:45=         |
@@ -239,7 +345,9 @@ uses:
 - 1 quota unit per video details batch (videos call)
 
 The default daily quota is 10,000 units, which is sufficient for most
-use cases.
+use cases --- roughly one unit per 25 videos fetched.  On very large
+channels, prefer =:newest= or =:since=, which stop fetching early; see
+*Fetching cost* above.
 
 * Troubleshooting
 

@@ -182,6 +182,32 @@ Return \"N/A\" if ISO8601-DURATION is nil or invalid."
   "Return VIDEO's duration in seconds, or nil when unknown."
   (youtube-gt--iso8601-to-seconds (cdr (assoc 'duration video))))
 
+(defun youtube-gt--video-keep-p (video min-length since match)
+  "Return non-nil when VIDEO passes every active filter.
+
+MIN-LENGTH is 0 (no filter) or a duration in minutes; a video is
+kept when it lasts at least that long.  SINCE is nil or a
+YYYY-MM-DD date; a video is kept when it was published on that date
+or later.  MATCH is nil or a regexp; a video is kept when its title
+matches, case-insensitively.
+
+A video whose duration or publication date is unknown fails the
+corresponding filter rather than being kept on a guess."
+  (and (or (zerop min-length)
+           (let ((secs (youtube-gt--video-duration-seconds video)))
+             (and secs (>= secs (* 60 min-length)))))
+       (or (null since)
+           (let ((published (cdr (assoc 'published video))))
+             ;; `published' is "N/A" when unknown; compare only real
+             ;; dates, which are fixed-width and so order lexically.
+             (and published
+                  (string-match-p "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'"
+                                  published)
+                  (not (string< published since)))))
+       (or (null match)
+           (let ((case-fold-search t))
+             (string-match-p match (or (cdr (assoc 'title video)) ""))))))
+
 (defun youtube-gt--format-date (iso8601-date)
   "Extract and format the date from ISO8601-DATE to YYYY-MM-DD.
 Return \"N/A\" if ISO8601-DATE is nil or invalid."
@@ -305,62 +331,114 @@ HANDLE should be in the format @username."
       (setq list (nthcdr size list)))
     (nreverse result)))
 
-(defun youtube-gt--fetch-all-videos (playlist-id)
-  "Fetch all videos from PLAYLIST-ID, handling pagination.
-Returns list of video alists, ordered oldest to newest."
-  (let ((videos '())
-        (next-page-token t))
-    ;; Fetch all pages
-    (while next-page-token
-      (let* ((response (youtube-gt--fetch-playlist-items
-                        playlist-id
-                        (when (stringp next-page-token) next-page-token)))
-             (items (cdr (assoc 'items response))))
-        (setq videos (append videos items))
-        (setq next-page-token (cdr (assoc 'nextPageToken response)))))
+(defun youtube-gt--item-video-id (item)
+  "Return the video ID carried by playlist ITEM."
+  (cdr (assoc 'videoId (cdr (assoc 'contentDetails item)))))
 
-    ;; Deduplicate videos by video-id, keeping first occurrence
-    (let* ((seen-ids (make-hash-table :test 'equal))
-           (unique-videos
-            (cl-remove-if (lambda (item)
-                            (let ((video-id (cdr (assoc 'videoId
-                                                       (cdr (assoc 'contentDetails item))))))
-                              (if (gethash video-id seen-ids)
-                                  t  ; Remove this item (duplicate)
-                                (puthash video-id t seen-ids)
-                                nil)))  ; Keep this item (first occurrence)
-                          videos)))
+(defun youtube-gt--fetch-durations (video-ids)
+  "Return an alist mapping each of VIDEO-IDS (as a symbol) to its duration.
+Requests are split into batches of 50, the API's per-call limit."
+  (apply #'append
+         (mapcar (lambda (chunk)
+                   (let* ((response (youtube-gt--fetch-video-details chunk))
+                          (items (cdr (assoc 'items response))))
+                     (mapcar (lambda (item)
+                               (let* ((id (cdr (assoc 'id item)))
+                                      (content (cdr (assoc 'contentDetails item)))
+                                      (duration (cdr (assoc 'duration content))))
+                                 (cons (intern id) duration)))
+                             items)))
+                 (youtube-gt--chunk-list video-ids 50))))
 
-      ;; Fetch durations in batches of 50 (API limit)
-      (let* ((video-ids (mapcar (lambda (item)
-                                  (cdr (assoc 'videoId
-                                             (cdr (assoc 'contentDetails item)))))
-                                unique-videos))
-             (id-chunks (youtube-gt--chunk-list video-ids 50))
-             (duration-alist
-              (apply #'append
-                     (mapcar (lambda (chunk)
-                               (let* ((response (youtube-gt--fetch-video-details chunk))
-                                      (items (cdr (assoc 'items response))))
-                                 (mapcar (lambda (item)
-                                           (let* ((id (cdr (assoc 'id item)))
-                                                  (content (cdr (assoc 'contentDetails item)))
-                                                  (duration (cdr (assoc 'duration content))))
-                                             (cons (intern id) duration)))
-                                         items)))
-                             id-chunks))))
-        ;; Parse videos and reverse to get oldest-first order
-        (reverse (mapcar (lambda (item)
-                           (youtube-gt--parse-video-from-item item duration-alist))
-                         unique-videos))))))
+(defun youtube-gt--videos-from-items (items)
+  "Parse one page of playlist ITEMS into video alists.
+Durations for the whole page are fetched in a single request."
+  (let ((duration-alist (when items
+                          (youtube-gt--fetch-durations
+                           (mapcar #'youtube-gt--item-video-id items)))))
+    (mapcar (lambda (item)
+              (youtube-gt--parse-video-from-item item duration-alist))
+            items)))
+
+(defun youtube-gt--fetch-all-videos (playlist-id &optional keep-p limit stop-page-p)
+  "Fetch videos from PLAYLIST-ID, handling pagination.
+Return (TOTAL . VIDEOS), where VIDEOS is a list of video alists
+ordered oldest to newest, and TOTAL is the number of videos in the
+whole playlist -- so the first element of VIDEOS is at absolute
+position TOTAL minus the length of VIDEOS.
+
+Pages arrive newest-first, so fetching can stop before the end of a
+long playlist.  KEEP-P, LIMIT, and STOP-PAGE-P control that and are
+pure optimizations: they only stop pagination sooner, and do not
+determine what the caller keeps.
+
+KEEP-P is a predicate on a video; fetching stops once LIMIT videos
+satisfying it have been seen.  STOP-PAGE-P is called with each page's
+videos and stops pagination when it returns non-nil.  With none of
+them supplied, every page is fetched and TOTAL is an exact count;
+otherwise TOTAL is the total the API reports."
+  (let ((chunks '())
+        (fetched 0)
+        (kept 0)
+        (reported-total nil)
+        (seen-ids (make-hash-table :test 'equal))
+        (page-token nil)
+        (complete nil)
+        (done nil))
+    (while (not done)
+      (let* ((response (youtube-gt--fetch-playlist-items playlist-id page-token))
+             (items (cdr (assoc 'items response)))
+             (next-page-token (cdr (assoc 'nextPageToken response)))
+             ;; Deduplicate by video-id, keeping the first occurrence.
+             (unique (cl-remove-if (lambda (item)
+                                     (let ((id (youtube-gt--item-video-id item)))
+                                       (if (gethash id seen-ids)
+                                           t
+                                         (puthash id t seen-ids)
+                                         nil)))
+                                   items))
+             (videos (youtube-gt--videos-from-items unique)))
+        (unless reported-total
+          (setq reported-total (cdr (assoc 'totalResults
+                                           (cdr (assoc 'pageInfo response))))))
+        (push videos chunks)
+        (setq fetched (+ fetched (length videos)))
+        (when limit
+          (setq kept (+ kept (seq-count (or keep-p #'always) videos))))
+        (setq page-token next-page-token)
+        (setq complete (null next-page-token))
+        (setq done (or complete
+                       (and limit (>= kept limit))
+                       (and stop-page-p (funcall stop-page-p videos))))))
+    (cons (if (or complete (null reported-total))
+              fetched
+            ;; A reported total below what we actually fetched would
+            ;; push absolute positions negative; the fetch count is
+            ;; the safer floor.
+            (max reported-total fetched))
+          ;; CHUNKS holds the pages newest-page-first, each page itself
+          ;; newest-first; reversing both levels yields oldest-first.
+          (cl-loop for chunk in chunks nconc (reverse chunk)))))
 
 ;;; Table Parsing Functions
 
 (defun youtube-gt--find-table-after-point ()
-  "Find org table after point, return (start . end) positions or nil."
+  "Find the org table belonging to the directive just above point.
+Return its (START . END) positions, or nil when the directive has no
+table yet.
+
+Only a table that follows point directly counts -- blank lines may
+separate the two, nothing else.  The search deliberately does NOT
+scan ahead for the next table in the buffer: a directive with no
+table of its own would otherwise find an unrelated table further
+down the file and delete it."
   (save-excursion
-    (when (re-search-forward "^[[:space:]]*|" nil t)
-      (beginning-of-line)
+    (beginning-of-line)
+    ;; Step over blank lines only.
+    (while (and (not (eobp))
+                (looking-at "^[[:space:]]*$"))
+      (forward-line 1))
+    (when (looking-at "^[[:space:]]*|")
       (let ((start (point)))
         ;; Find end of table
         (while (and (not (eobp))
@@ -439,27 +517,49 @@ Returns list of table row alists."
 
 (defun youtube-gt--row-annotated-p (row)
   "Return non-nil when ROW has a non-empty note1 or note2 field.
-Annotations are the user's signal that a row is worth keeping even
-after it falls out of the current fetch (via `:offset', `:min-length',
-or removal from the playlist)."
+Annotations are the user's signal that a row is worth keeping, with
+the index it already has, even after it falls out of the current
+fetch (via any of the directive filters, or removal from the
+playlist)."
   (let ((n1 (cdr (assoc 'note1 row)))
         (n2 (cdr (assoc 'note2 row))))
     (or (and n1 (not (string-empty-p n1)))
         (and n2 (not (string-empty-p n2))))))
 
+(defun youtube-gt--row-index-value (row)
+  "Return ROW's index as a number for sorting.
+Rows whose index is not numeric -- a legacy \"NA\", or a hand-edited
+cell -- sort last rather than ahead of position 0."
+  (let ((index (cdr (assoc 'index row))))
+    (if (and index (string-match-p "\\`[0-9]+\\'" index))
+        (string-to-number index)
+      most-positive-fixnum)))
+
+(defun youtube-gt--sort-rows (rows)
+  "Return ROWS ordered by their index.
+The sort is stable, so a preserved row and a fetched row that claim
+the same position keep the order they were merged in."
+  (sort (copy-sequence rows)
+        (lambda (a b) (< (youtube-gt--row-index-value a)
+                         (youtube-gt--row-index-value b)))))
+
 (defun youtube-gt--merge-rows (old-rows new-rows)
   "Merge OLD-ROWS with NEW-ROWS, preserving manual notes.
 
 Every NEW-ROWS entry appears in the result with its notes merged in
-from any matching OLD-ROWS entry (matched by video-id).
+from any matching OLD-ROWS entry (matched by video-id), and with the
+index the current fetch assigned it.
 
 An OLD-ROWS entry that has no counterpart in NEW-ROWS -- because it
-was filtered out by `:offset' / `:min-length' or removed from the
-playlist -- is kept in the result with its index changed to \"NA\"
-ONLY when it carries an annotation (see `youtube-gt--row-annotated-p').
-Unannotated old rows that fall out of view are silently dropped, so
-tightening a filter cleans up the table instead of accumulating
-noise."
+was filtered out by a directive parameter or removed from the
+playlist -- is kept in the result, keeping the index it already
+carried, ONLY when it carries an annotation (see
+`youtube-gt--row-annotated-p').  Unannotated old rows that are no
+longer fetched are dropped, so tightening a filter removes rows from
+the table instead of accumulating them.
+
+The result is ordered by index, so preserved rows appear between the
+fetched ones instead of after all of them."
   (let* ((old-by-id (mapcar (lambda (row)
                               (cons (cdr (assoc 'video-id row)) row))
                             old-rows))
@@ -480,16 +580,16 @@ noise."
         (push new-row result)))
 
     ;; Add old rows that are no longer in the fetch -- but ONLY if the
-    ;; user annotated them.  Unannotated rows just disappear.
+    ;; user annotated them.  They keep the index they were last given;
+    ;; unannotated rows just disappear.
     (dolist (old-pair old-by-id)
       (let* ((video-id (car old-pair))
              (old-row (cdr old-pair)))
         (when (and (not (assoc video-id new-by-id))
                    (youtube-gt--row-annotated-p old-row))
-          (setcdr (assoc 'index old-row) "NA")
           (push old-row result))))
 
-    (nreverse result)))
+    (youtube-gt--sort-rows (nreverse result))))
 
 (defun youtube-gt--generate-table-string (rows)
   "Generate org table string from ROWS list."
@@ -497,36 +597,137 @@ noise."
 
 ;;; Update Functions
 
-(defconst youtube-gt--recognized-params '("offset" "min-length")
-  "Directive parameter names accepted after the URL, in `:name=N' form.")
+(defconst youtube-gt--param-specs
+  '(("offset"     . integer)
+    ("newest"     . integer)
+    ("min-length" . integer)
+    ("since"      . date)
+    ("match"      . regexp))
+  "Directive parameters accepted after the URL, as (NAME . TYPE).
+Each is written `:NAME=VALUE'; TYPE constrains the accepted VALUE
+and is one of `integer', `date' (YYYYMMDD or YYYY-MM-DD), or
+`regexp' (a bare token, or any text inside double quotes).")
+
+(defun youtube-gt--param-value-regexp (type)
+  "Return the regexp matching the value of a parameter of TYPE.
+The value is captured in group 1, except for the unquoted branch of
+a `regexp' parameter, which is captured in group 2."
+  (pcase type
+    ('integer "\\([0-9]+\\)")
+    ('date "\\([0-9]\\{8\\}\\|[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\)")
+    ('regexp "\\(?:\"\\([^\"]*\\)\"\\|\\([^\"[:space:]]+\\)\\)")))
+
+(defun youtube-gt--normalize-date (string)
+  "Normalize STRING, a YYYYMMDD or YYYY-MM-DD date, to YYYY-MM-DD.
+Return nil when STRING does not denote a plausible calendar date."
+  (let* ((digits (replace-regexp-in-string "-" "" string))
+         (month (string-to-number (substring digits 4 6)))
+         (day (string-to-number (substring digits 6 8))))
+    (when (and (<= 1 month 12) (<= 1 day 31))
+      (concat (substring digits 0 4) "-"
+              (substring digits 4 6) "-"
+              (substring digits 6 8)))))
+
+(defun youtube-gt--param-value (type raw)
+  "Convert RAW, the text captured for a parameter of TYPE, to its value.
+Return nil when RAW is not a valid value for TYPE."
+  (pcase type
+    ('integer (string-to-number raw))
+    ('date (youtube-gt--normalize-date raw))
+    ;; A syntactically invalid regexp makes `string-match-p' signal;
+    ;; catching that here keeps the failure at directive-parse time.
+    ('regexp (when (ignore-errors (string-match-p raw "") t) raw))))
+
+(defun youtube-gt--strip-trailing-param (string)
+  "Strip one trailing `:name=value' parameter from STRING.
+Return (REMAINDER NAME . VALUE) on success, the symbol `invalid' when
+a recognized name carries an out-of-range value (e.g. `:since=99999999'),
+or nil when STRING does not end in a recognized parameter.
+
+Names are matched case-sensitively: `:Offset=5' is not a recognized
+parameter, and is refused rather than treated as `:offset=5'."
+  (cl-loop with case-fold-search = nil ; `:Offset=5' is not `:offset=5'
+           for (name . type) in youtube-gt--param-specs
+           for re = (concat "[[:space:]]*:" (regexp-quote name) "="
+                            (youtube-gt--param-value-regexp type) "\\'")
+           when (string-match re string)
+           return (let* ((raw (or (match-string 1 string)
+                                  (match-string 2 string)))
+                         (start (match-beginning 0))
+                         (value (youtube-gt--param-value type raw)))
+                    (if (null value)
+                        'invalid
+                      (cons (substring string 0 start)
+                            (cons (intern name) value))))))
+
+(defun youtube-gt--url-token-p (token)
+  "Return non-nil when TOKEN is a URL with no unconsumed text attached.
+
+TOKEN is what remains of a directive once every recognized parameter
+has been stripped, so it must be exactly the URL: one non-whitespace
+token, and -- apart from the `://' of its scheme -- free of any colon.
+
+A surviving colon means text that was meant as a parameter but does
+not match one: a misspelling (`:offst=5'), the wrong case
+\(`:Offset=5'), a missing value (`:since'), or a name this version
+does not implement.  Such text is refused rather than ignored,
+because ignoring it would silently produce a table for the unfiltered
+playlist."
+  (let ((without-scheme
+         (replace-regexp-in-string "\\`[a-zA-Z][a-zA-Z0-9+.-]*://" "" token)))
+    (and (string-match-p "\\`\\S-+\\'" token)
+         (not (string-match-p ":" without-scheme)))))
 
 (defun youtube-gt--parse-directive-args (line)
   "Parse LINE (directive body after the colon) into (URL PARAMS).
-PARAMS is an alist of (SYMBOL . INTEGER) for each recognized
-`:name=N' suffix in LINE.  Return nil when LINE is malformed
---- when a `:name...' fragment does not match the strict
-`:name=<digits>' shape, when an unknown `:name' is used, or when
-the URL portion is not a single non-whitespace token."
+PARAMS is an alist of (SYMBOL . VALUE) for each recognized
+`:name=value' suffix in LINE; see `youtube-gt--param-specs'.
+
+Return (nil LEFTOVER) when LINE is malformed, where LEFTOVER is the
+text that could not be interpreted -- as the URL, or as a recognized
+parameter.  A fragment whose value does not match the shape its type
+requires (`:offset=abc'), an unknown or misspelled name (`:foo=1',
+`:Offset=5'), and a URL portion that is not a single non-whitespace
+token all end up there."
   (let ((rest line)
         (params '())
-        (re (concat "[[:space:]]*:\\("
-                    (mapconcat #'regexp-quote
-                               youtube-gt--recognized-params "\\|")
-                    "\\)=\\([0-9]+\\)\\'")))
-    (while (string-match re rest)
-      (push (cons (intern (match-string 1 rest))
-                  (string-to-number (match-string 2 rest)))
-            params)
-      (setq rest (substring rest 0 (match-beginning 0))))
+        (bad nil)
+        (done nil))
+    (while (not (or bad done))
+      (let ((stripped (youtube-gt--strip-trailing-param rest)))
+        (cond
+         ((eq stripped 'invalid) (setq bad t))
+         ((null stripped) (setq done t))
+         (t (setq rest (car stripped))
+            (push (cdr stripped) params)))))
     (setq rest (string-trim rest))
-    ;; The remainder must be a single non-whitespace URL token.  Any
-    ;; leftover `:name...' fragment means either a malformed value on a
-    ;; recognized name (e.g. `:offset=abc') or an unknown parameter
-    ;; (e.g. `:foo=1'); refuse to guess in either case.  The `://' in
-    ;; the URL scheme is not matched because `/' is not a letter.
-    (when (and (string-match-p "\\`\\S-+\\'" rest)
-               (not (string-match-p ":[a-z][a-z-]*" rest)))
-      (list rest params))))
+    (if (and (not bad) (youtube-gt--url-token-p rest))
+        (list rest params)
+      (list nil rest))))
+
+(defun youtube-gt--uploads-playlist-p (playlist-id)
+  "Return non-nil when PLAYLIST-ID is a channel's uploads playlist.
+Those IDs are the channel ID with its leading `UC' replaced by `UU',
+and only they are guaranteed to be ordered newest-first."
+  (string-prefix-p "UU" playlist-id))
+
+(defun youtube-gt--stop-page-function (playlist-id since)
+  "Return a page predicate that ends a `:since' fetch early, or nil.
+
+Pagination can stop once a whole page predates SINCE, but only when
+PLAYLIST-ID is ordered by date: a manually ordered playlist may list
+an old video before a recent one, and stopping there would silently
+drop the rest.  Return nil in that case, so every page of such a
+playlist is fetched."
+  (when (and since (youtube-gt--uploads-playlist-p playlist-id))
+    (lambda (videos)
+      (seq-every-p (lambda (video)
+                     (let ((published (cdr (assoc 'published video))))
+                       (and published
+                            (string-match-p "\\`[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\'"
+                                            published)
+                            (string< published since))))
+                   videos))))
 
 (defun youtube-gt--update-at-point ()
   "Update YouTube playlist table at current directive line.
@@ -539,14 +740,24 @@ Signal `user-error' when the directive is malformed."
                               ":[[:space:]]+\\(.+\\)$"))
       (let* ((line (string-trim (match-string 1)))
              (parsed (youtube-gt--parse-directive-args line))
-             (_ (unless parsed
-                  (user-error
-                   "%s: expected \"URL\" optionally followed by \":offset=N\" and/or \":min-length=N\", got: %s"
-                   youtube-gt-directive line)))
              (url (car parsed))
+             (_ (unless url
+                  (user-error
+                   "%s: unrecognized text %S; expected a URL optionally followed by %s"
+                   youtube-gt-directive
+                   (cadr parsed)
+                   (mapconcat (lambda (spec) (format ":%s=..." (car spec)))
+                              youtube-gt--param-specs " / "))))
              (params (cadr parsed))
              (offset (or (cdr (assq 'offset params)) 0))
+             (newest (cdr (assq 'newest params)))
              (min-length (or (cdr (assq 'min-length params)) 0))
+             (since (cdr (assq 'since params)))
+             (match (cdr (assq 'match params)))
+             (_ (when (and newest (> offset 0))
+                  (user-error
+                   "%s: :offset counts from the oldest video and :newest from the newest; use one or the other"
+                   youtube-gt-directive)))
              ;; Try to extract playlist ID, or get it from channel handle
              (playlist-id (youtube-gt--extract-playlist-id url))
              (channel-handle (unless playlist-id
@@ -559,36 +770,45 @@ Signal `user-error' when the directive is malformed."
         (unless playlist-id
           (error "Could not extract playlist ID or channel handle from: %s" url))
 
-        (cond
-         ((and (> offset 0) (> min-length 0))
-          (message "Fetching playlist %s (skipping %d, keeping >=%dm)..."
-                   playlist-id offset min-length))
-         ((> offset 0)
-          (message "Fetching playlist %s (skipping first %d videos)..."
-                   playlist-id offset))
-         ((> min-length 0)
-          (message "Fetching playlist %s (keeping videos >=%d minutes)..."
-                   playlist-id min-length))
-         (t
-          (message "Fetching playlist %s..." playlist-id)))
-        (let* ((all-videos (youtube-gt--fetch-all-videos playlist-id))
-               (after-offset (if (> offset 0)
-                                 (nthcdr offset all-videos)
-                               all-videos))
-               ;; Pair each surviving video with its offset-adjusted
-               ;; index BEFORE filtering, so positional indices remain
-               ;; meaningful when `min-length' drops middle rows.
+        (let ((active (delq nil
+                            (list (when (> offset 0)
+                                    (format "skipping first %d" offset))
+                                  (when newest (format "newest %d" newest))
+                                  (when (> min-length 0)
+                                    (format ">=%d minutes" min-length))
+                                  (when since (format "since %s" since))
+                                  (when match (format "matching %s" match))))))
+          (if active
+              (message "Fetching playlist %s (%s)..."
+                       playlist-id (mapconcat #'identity active ", "))
+            (message "Fetching playlist %s..." playlist-id)))
+        (let* ((keep-p (lambda (video)
+                         (youtube-gt--video-keep-p video min-length since match)))
+               (fetched (youtube-gt--fetch-all-videos
+                         playlist-id keep-p newest
+                         (youtube-gt--stop-page-function playlist-id since)))
+               (total (car fetched))
+               (all-videos (cdr fetched))
+               ;; Absolute position of the first fetched video: pagination
+               ;; may have stopped early, in which case what we hold is
+               ;; the tail of the playlist, not the whole of it.
+               (base (max 0 (- total (length all-videos))))
+               ;; Pair each video with its absolute index BEFORE
+               ;; filtering, so positional indices remain meaningful
+               ;; when a filter drops middle rows.
                (indexed (seq-map-indexed
-                         (lambda (v i) (cons (+ i offset) v))
-                         after-offset))
-               (survivors (if (> min-length 0)
-                              (seq-filter
-                               (lambda (pair)
-                                 (let ((secs (youtube-gt--video-duration-seconds
-                                              (cdr pair))))
-                                   (and secs (>= secs (* 60 min-length)))))
-                               indexed)
-                            indexed))
+                         (lambda (v i) (cons (+ base i) v))
+                         all-videos))
+               (after-offset (if (> offset 0)
+                                 (seq-filter (lambda (pair) (>= (car pair) offset))
+                                             indexed)
+                               indexed))
+               (matching (seq-filter (lambda (pair) (funcall keep-p (cdr pair)))
+                                     after-offset))
+               ;; VIDEOS run oldest-first, so the N newest are the tail.
+               (survivors (if newest
+                              (last matching newest)
+                            matching))
                (new-rows (mapcar (lambda (pair)
                                    (youtube-gt--video-to-row (car pair)
                                                              (cdr pair)))
