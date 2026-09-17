@@ -7,8 +7,38 @@
 #+texinfo_dir_title: youtube-gt: (youtube-gt).
 #+texinfo_dir_desc: Manage YouTube playlist tables in org-mode files.
 
-An Emacs package for managing YouTube playlist information in org-mode
+An Emacs package for managing YouTube playlists in org-mode
 files.
+
+Youtube is full of interesting videos and playlists, but youtube does not make it easy to keep track of what you are watching. And it does not make it easy to query a given playlist.
+
+For example, I like watching CBC's "About That" hosted by Andrew Change. videos. Unfortunately he does not have a specific playlist and worse, the entire playlist of CBC News is 20k videos.
+
+You add the following line to a youtube file. It indicates the address of the playlist, a regular expression that the title must match (in this case "About That", and the maximum number of videos to download (newest 10 in this case).
+There are other query parameters (see documentation below).
+
+#+begin_example
+,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/@CBCNews/videos  :match="About That"  :newest=10
+#+end_example
+
+Then you run the command: ~youtube-gt-update-all~ then it will create the following.
+
+#+begin_example
+,#+YOUTUBE-GT_UPDATE: https://www.youtube.com/@CBCNews/videos  :match="About That"  :newest=10
+| 19638 |                 |    |  4:39 | 2026-08-28 | [[https://www.youtube.com/watch?v=k4TrxKiCf_8][k4TrxKiCf_8]] | Will Bessent's bond market intervention make U.S. inflation worse? : About That |
+| 19679 |                 |    |  2:57 | 2026-08-31 | [[https://www.youtube.com/watch?v=xbxQ4WtQJAk][xbxQ4WtQJAk]] | Can Iran really launch sea mines from rockets? : About That                     |
+| 19701 |                 |    |  2:58 | 2026-09-01 | [[https://www.youtube.com/watch?v=abQPVmJq4JA][abQPVmJq4JA]] | Canada poaches top American talent : About That                                 |
+| 19730 |                 |    | 11:53 | 2026-09-02 | [[https://www.youtube.com/watch?v=TBCQP-CnEUQ][TBCQP-CnEUQ]] | Why the Nepal flash flood was almost impossible to predict : About That         |
+| 19753 |                 |    |  2:59 | 2026-09-03 | [[https://www.youtube.com/watch?v=ciziciv0nKI][ciziciv0nKI]] | Why you can’t predict a disaster like Nepal’s flood : About That                |
+| 19768 |                 |    |  2:47 | 2026-09-04 | [[https://www.youtube.com/watch?v=fscVV9XtT7g][fscVV9XtT7g]] | The Netherlands takes its gold out of the U.S. : About That                     |
+| 19838 |                 |    |  9:15 | 2026-09-09 | [[https://www.youtube.com/watch?v=jmdvgnd0OLg][jmdvgnd0OLg]] | Can Canada actually win a trade war with the U.S.? : About That                 |
+| 19862 |                 |    |  2:31 | 2026-09-10 | [[https://www.youtube.com/watch?v=1pPdE-JNXdg][1pPdE-JNXdg]] | Inside the French museum art heist : About That                                 |
+| 19967 |                 |    | 13:40 | 2026-09-15 | [[https://www.youtube.com/watch?v=cPgwnUr1sbE][cPgwnUr1sbE]] | A reasonable person's guide to how AI destroys humanity : About That            |
+| 19992 |                 |    |  2:59 | 2026-09-16 | [[https://www.youtube.com/watch?v=aJAtsx6dP94][aJAtsx6dP94]] | Can Iran replicate a U.S. underwater drone? : About That                        |
+#+end_example
+
+The second and third column are for you to make notes. Rows with info in those columns will be left untouched. that way you can keep track of which videos you have watched
+while allowing you to update the playlist.
 
 * Features
 
